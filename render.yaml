@@ -1,0 +1,37 @@
+# Render Blueprint (Infrastructure-as-Code).
+# Deploy by pointing Render at this repo:  New + -> Blueprint -> pick repo.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# ONE free Docker web service that serves both the API (/api/*) and the SPA.
+services:
+  - type: web
+    name: retail-analytics
+    runtime: docker
+    plan: free                 # free instance type
+    # region: singapore        # uncomment the region closest to you (default: oregon)
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true           # redeploy automatically on every git push
+    envVars:
+      # Random secret used to sign session cookies - generated once by Render.
+      - key: AUTH_SECRET_KEY
+        generateValue: true
+      # Marks the deployment as HTTPS so the session cookie is flagged `secure`.
+      - key: ENVIRONMENT
+        value: production
+      # First ADMIN created automatically the first time the (ephemeral) auth
+      # database is created.
+      - key: INITIAL_ADMIN_EMAIL
+        value: mis@adonisgroup.in
+      # Same-origin app, so CORS is only a safety net.
+      - key: CORS_ORIGINS
+        value: "*"
+      # Prompted for on first Blueprint apply (kept out of git).
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Must equal https://<your-service-name>.onrender.com/api/auth/callback
+      - key: GOOGLE_REDIRECT_URI
+        sync: false

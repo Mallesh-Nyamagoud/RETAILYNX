@@ -1,0 +1,140 @@
+@import "@fontsource/sora/500.css";
+@import "@fontsource/sora/600.css";
+@import "@fontsource/sora/700.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------
+   Design tokens. Dark ("Command Center") is the flagship default look;
+   light is a fully realised second theme, not just an inverted dark mode.
+   --------------------------------------------------------------------- */
+:root {
+  --color-base: #f4f5fa;
+  --color-surface: #ffffff;
+  --color-card: #ffffff;
+  --color-card-hover: #f8f9fd;
+  --color-border: #e5e7f2;
+  --color-border-strong: #d3d7e8;
+  --color-text-primary: #131a2c;
+  --color-text-secondary: #566080;
+  --color-text-muted: #8791ac;
+  --color-accent: #3f5eea;
+  --color-accent-hover: #344fd0;
+  --color-accent-soft: #e8ecfd;
+  --color-teal: #0e9488;
+  --color-teal-soft: #e2f6f3;
+  --color-positive: #16a34a;
+  --color-positive-soft: #e7f7ed;
+  --color-negative: #e11d48;
+  --color-negative-soft: #fdeaef;
+  --color-warn: #b45309;
+  --color-warn-soft: #fdf1e0;
+}
+
+html.dark {
+  --color-base: #0f172a;
+  --color-surface: #1e293b;
+  --color-card: #2c3e50;
+  --color-card-hover: #3e5064;
+  --color-border: #4a5a6a;
+  --color-border-strong: #6b7a8a;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-accent: #38bdf8;
+  --color-accent-hover: #7dd3fc;
+  --color-accent-soft: rgba(56, 189, 248, 0.15);
+  --color-teal: #2dd4bf;
+  --color-teal-soft: rgba(45, 212, 191, 0.15);
+  --color-positive: #4ade80;
+  --color-positive-soft: rgba(74, 222, 128, 0.15);
+  --color-negative: #f87171;
+  --color-negative-soft: rgba(248, 113, 113, 0.15);
+  --color-warn: #facc15;
+  --color-warn-soft: rgba(250, 204, 21, 0.15);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-base);
+  color: var(--color-text-primary);
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+/* Scrollbars - understated, matches surface */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Keyboard focus visibility, respected everywhere */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.shimmer-bg {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-card) 0%,
+    var(--color-card-hover) 40%,
+    var(--color-card) 80%
+  );
+  background-size: 800px 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* CodeMirror SQL editor sizing */
+.cm-editor {
+  height: 100%;
+  font-family: "JetBrains Mono", monospace;
+}
+.cm-scroller {
+  overflow: auto;
+}

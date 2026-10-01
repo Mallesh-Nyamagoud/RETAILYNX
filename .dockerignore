@@ -1,0 +1,28 @@
+# Never send these into the image build context.
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+.git
+.gitignore
+
+# Secrets - configured as Render environment variables instead
+.env
+**/.env
+
+# Local build output (Docker rebuilds the SPA in stage 1)
+frontend/dist
+frontend/build
+
+# DuckDB: keep the seed DBs, drop the local working copies / auth db
+backend/data/*.duckdb
+!backend/data/*_src.duckdb
+backend/data/*.duckdb.wal
+backend/data/auth.sqlite
+
+# Docs / scratch
+README.md
+DEPLOY.md
+**/*.log
+**/*_output.txt
