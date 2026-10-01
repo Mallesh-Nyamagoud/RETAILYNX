@@ -78,8 +78,10 @@ def init_db():
         # Bootstrap / repair the initial admin so there is always a way in.
         # On Render's free tier the SQLite file is ephemeral and is recreated on
         # every cold start, so this runs again each time the service wakes up.
+        # The password defaults to the app's existing admin password; override it
+        # with the INITIAL_ADMIN_PASSWORD environment variable if you prefer.
         admin_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@company.com").lower()
-        admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD")
+        admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "ADONIS@13719")
         row = conn.execute(
             "SELECT id, password_hash FROM users WHERE email = ?", (admin_email,)
         ).fetchone()
