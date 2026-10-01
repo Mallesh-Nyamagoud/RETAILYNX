@@ -61,6 +61,42 @@ class PasswordAuthTests(unittest.TestCase):
         auth.update_user_status(user["id"], False)
         self.assertIsNone(auth.authenticate("mis@adonisgroup.in", "ADONIS@13719"))
 
+    def test_startup_repairs_disabled_admin_and_blank_password(self):
+        broken = auth.authenticate("mis@adonisgroup.in", "ADONIS@13719")
+        auth.update_user_status(broken["id"], False)
+        # Simulate a blank hash left by a bad space/empty config.
+        with auth.get_db() as conn:
+            conn.execute("UPDATE users SET password_hash = NULL WHERE id = ?", (broken["id"],))
+            conn.commit()
+        auth.init_db()
+        repaired = auth.authenticate("mis@adonisgroup.in", "ADONIS@13719")
+        self.assertIsNotNone(repaired)
+        self.assertEqual(repaired["role"], "ADMIN")
+
+    def test_blank_env_values_fall_back_to_defaults(self):
+        saved = {key: os.environ.get(key) for key in ("INITIAL_ADMIN_EMAIL", "INITIAL_ADMIN_PASSWORD")}
+        try:
+            os.environ["INITIAL_ADMIN_EMAIL"] = "   "
+            os.environ["INITIAL_ADMIN_PASSWORD"] = ""
+            email, password, source = auth._admin_credentials()
+            # A blank email falls back to the code default, a blank password to
+            # the app's existing admin password.
+            self.assertEqual(email, "admin@company.com")
+            self.assertEqual(password, "ADONIS@13719")
+            self.assertEqual(source, "default")
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_login_inputs_ignore_surrounding_spaces(self):
+        auth.add_user("analyst@company.com", "USER", "pw123456")
+        # Email padding is harmless; extra spaces in a password are part of it.
+        self.assertIsNotNone(auth.authenticate("  analyst@company.com  ", "pw123456"))
+        self.assertIsNone(auth.authenticate("analyst@company.com", "  pw123456  "))
+
     def test_add_user_with_password_never_leaks_hash(self):
         created = auth.add_user("analyst@company.com", "USER", "pw123456")
         self.assertNotIn("password_hash", created)

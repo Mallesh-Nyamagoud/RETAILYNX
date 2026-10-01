@@ -59,6 +59,22 @@ def _public(row: Optional[sqlite3.Row]) -> Optional[dict]:
     return data
 
 
+def _admin_credentials() -> tuple:
+    """(email, password, source) for the bootstrap admin account.
+
+    Blank env values are treated as *unset* (falling back to the defaults),
+    and surrounding whitespace is ignored - so a stray space in a setting can
+    never silently lock everyone out. The default password matches the app's
+    existing admin password.
+    """
+    raw_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@company.com")
+    raw_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
+    email = (raw_email or "admin@company.com").strip().lower() or "admin@company.com"
+    password = (raw_password or "").strip() or "ADONIS@13719"
+    source = "env" if (raw_password or "").strip() else "default"
+    return email, password, source
+
+
 def init_db():
     with get_db() as conn:
         conn.execute("""
@@ -78,10 +94,10 @@ def init_db():
         # Bootstrap / repair the initial admin so there is always a way in.
         # On Render's free tier the SQLite file is ephemeral and is recreated on
         # every cold start, so this runs again each time the service wakes up.
-        # The password defaults to the app's existing admin password; override it
-        # with the INITIAL_ADMIN_PASSWORD environment variable if you prefer.
-        admin_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@company.com").lower()
-        admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "ADONIS@13719")
+        # A startup line below confirms which admin account was seeded, and the
+        # password-hash column is repaired if a previous space/empty config left
+        # it blank.
+        admin_email, admin_password, admin_source = _admin_credentials()
         row = conn.execute(
             "SELECT id, password_hash FROM users WHERE email = ?", (admin_email,)
         ).fetchone()
@@ -89,15 +105,23 @@ def init_db():
         if row is None:
             conn.execute(
                 "INSERT INTO users (email, role, password_hash) VALUES (?, 'ADMIN', ?)",
-                (admin_email, hash_password(admin_password) if admin_password else None),
+                (admin_email, hash_password(admin_password)),
             )
-            print(f"Bootstrapped auth database with initial admin: {admin_email}")
-        elif admin_password and not row["password_hash"]:
-            # Existing admin (e.g. created under the Google-OAuth era) with no
-            # password yet - give it the configured one so password login works.
+            print(f"[auth] bootstrapped active admin '{admin_email}' (password: {admin_source})")
+        elif not (row["password_hash"] or "").strip():
+            # Existing admin with a blank/missing password - give it the
+            # configured one so password login works.
             conn.execute(
-                "UPDATE users SET password_hash = ?, role = 'ADMIN' WHERE id = ?",
+                "UPDATE users SET password_hash = ?, role = 'ADMIN', is_active = 1 WHERE id = ?",
                 (hash_password(admin_password), row["id"]),
+            )
+            print(f"[auth] repaired blank password for admin '{admin_email}' (password: {admin_source})")
+        else:
+            # Admin already healthy: make sure the bootstrap account can always
+            # sign in, even if an old deploy left it disabled.
+            conn.execute(
+                "UPDATE users SET email = ?, role = 'ADMIN', is_active = 1 WHERE id = ?",
+                (admin_email, row["id"]),
             )
         conn.commit()
 
@@ -120,8 +144,11 @@ def get_all_users():
 
 def authenticate(email: str, password: str) -> Optional[dict]:
     """Return the ACTIVE user when email + password are valid, else None."""
+    if not email or password is None:
+        return None
+    normalized_email = email.strip().lower()
     with get_db() as conn:
-        row = conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (normalized_email,)).fetchone()
     if row is None:
         return None
     record = dict(row)
