@@ -4,8 +4,8 @@ from fastapi.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuth
 from itsdangerous import URLSafeSerializer
 
-from app.services.auth import get_user_by_email, get_user_by_id, get_all_users, add_user, update_user_status, remove_user
-from app.models.auth import UserCreate, UserUpdate
+from app.services.auth import get_user_by_email, get_user_by_id, get_all_users, add_user, update_user_status, remove_user, authenticate
+from app.models.auth import LoginRequest, UserCreate, UserUpdate
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -103,6 +103,29 @@ async def callback(request: Request):
     return response
 
 
+@router.post("/login")
+async def password_login(data: LoginRequest, response: Response):
+    """Email + password login (used instead of Google sign-in).
+
+    On success it issues the SAME signed session cookie the Google flow uses,
+    so every protected route (get_current_user) keeps working unchanged.
+    """
+    user = authenticate(data.email, data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    session_token = serializer.dumps(user["id"])
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=session_token,
+        httponly=True,
+        secure=os.environ.get("ENVIRONMENT") == "production",
+        samesite="lax",
+        max_age=86400 * 7,  # 7 days
+    )
+    return user
+
+
 @router.post("/logout")
 async def logout(response: Response):
     """Clears the session."""
@@ -126,7 +149,7 @@ def list_users(admin = Depends(get_current_admin)):
 @router.post("/users")
 def create_user(data: UserCreate, admin = Depends(get_current_admin)):
     try:
-        return add_user(data.email, data.role)
+        return add_user(data.email, data.role, data.password)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

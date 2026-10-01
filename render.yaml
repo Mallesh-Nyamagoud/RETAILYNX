@@ -21,17 +21,21 @@ services:
       - key: ENVIRONMENT
         value: production
       # First ADMIN created automatically the first time the (ephemeral) auth
-      # database is created.
+      # database is created, with the password below.
       - key: INITIAL_ADMIN_EMAIL
         value: mis@adonisgroup.in
+      # Password for that initial admin (email + password login).
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
       # Same-origin app, so CORS is only a safety net.
       - key: CORS_ORIGINS
         value: "*"
-      # Prompted for on first Blueprint apply (kept out of git).
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      # Must equal https://<your-service-name>.onrender.com/api/auth/callback
-      - key: GOOGLE_REDIRECT_URI
-        sync: false
+      # --- Google OAuth (disabled while password login is in use) ---
+      # Uncomment these three (and re-enable the Google button on the login
+      # page) to switch back to "Sign in with Google".
+      # - key: GOOGLE_CLIENT_ID
+      #   sync: false
+      # - key: GOOGLE_CLIENT_SECRET
+      #   sync: false
+      # - key: GOOGLE_REDIRECT_URI
+      #   sync: false

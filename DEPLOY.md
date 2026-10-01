@@ -89,10 +89,11 @@ In **Service → Environment**, add (Option A already sets these):
 | `AUTH_SECRET_KEY` | a long random string (Blueprint generates one) |
 | `ENVIRONMENT` | `production`  *(makes the session cookie `secure`/HTTPS-only)* |
 | `INITIAL_ADMIN_EMAIL` | `mis@adonisgroup.in` *(first admin auto-created)* |
-| `GOOGLE_CLIENT_ID` | from `backend/.env` |
-| `GOOGLE_CLIENT_SECRET` | from `backend/.env` |
-| `GOOGLE_REDIRECT_URI` | `https://<your-service>.onrender.com/api/auth/callback` |
+| `INITIAL_ADMIN_PASSWORD` | the password for that admin, e.g. `ADONIS@13719` *(email + password login)* |
 | `CORS_ORIGINS` | `*` |
+
+> `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` are **only**
+> needed if you switch back to Google sign-in; login now uses email + password.
 
 > `PORT` is injected by Render automatically — do **not** set it. `APP_DATA_DIR`
 > and `AUTH_DB_PATH` also have working defaults and can be left unset.
@@ -112,7 +113,10 @@ You should see `{"status":"ok","app":"Retail Analytics Command Center"}`.
 
 ---
 
-## Step 5 — Point Google OAuth at the new URL
+## Step 5 — Google OAuth (optional / not needed for password login)
+
+Login now uses **email + password**, so this step can be skipped. It is kept
+here for later if you ever switch back to Google sign-in:
 
 In <https://console.cloud.google.com> → **APIs & Services → Credentials** →
 your OAuth 2.0 Client ID:
@@ -131,8 +135,9 @@ Make sure Render's `GOOGLE_REDIRECT_URI` is **exactly** the same callback URL
 ## Step 6 — Verify
 
 1. Open `https://<your-service>.onrender.com` → redirected to **/login**.
-2. **Sign in with Google** using an allowed email (the bootstrapped admin, or a
-   user an admin added).
+2. **Sign in** with the admin email (`mis@adonisgroup.in`) and the
+   `INITIAL_ADMIN_PASSWORD` you set (e.g. `ADONIS@13719`). Admins can add more
+   users (with a password) from **User Access**.
 3. Check the pages: Dashboard, **Secondary Sales Analysis**, Tertiary, Store
    Master, SQL Platform.
 4. Confirm a known KPI, e.g. Secondary → filter Retailer = **BSC DAVANGERE** →
@@ -190,7 +195,8 @@ automatically.
 | Build fails at `npm ci` | Delete `frontend/package-lock.json` from git and re-push, or change the Dockerfile `npm ci` to `npm install`. |
 | Build fails at `pip install` | A wheel has no CPython 3.12 Linux build — adjust the pin in `backend/requirements.txt`. |
 | Deploy OK but `/` 404s | `frontend/dist` wasn't produced — check the frontend build stage logs. |
-| Login → `unauthorized_email` | The Google account isn't in the users table. The `INITIAL_ADMIN_EMAIL` admin is auto-created; add others from the Admin screen. |
+| Login → `unauthorized_email` | *(Google flow only)* The Google account isn't in the users table. The `INITIAL_ADMIN_EMAIL` admin is auto-created; add others from the Admin screen. |
+| Login → "Invalid email or password" | Wrong credentials, or the user has no password set. The `INITIAL_ADMIN_EMAIL` admin receives `INITIAL_ADMIN_PASSWORD`; set passwords for others from **User Access**. |
 | Login → `redirect_uri_mismatch` | Step 5's redirect URI ≠ `GOOGLE_REDIRECT_URI`. They must match exactly. |
 | Login loops back to `/login` | `ENVIRONMENT=production` but you're on `http://` — the `secure` cookie is dropped. Always use the `https://` URL. |
 | `/api/health` 502 for a minute | Cold start after idle; wait and retry. |

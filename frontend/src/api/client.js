@@ -12,7 +12,10 @@ http.interceptors.response.use(
       if (window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
-      return Promise.reject(new Error("Session expired or unauthorized. Please log in again."));
+      const detail = err?.response?.data?.detail;
+      return Promise.reject(
+        new Error(detail || "Session expired or unauthorized. Please log in again.")
+      );
     }
     const message =
       err?.response?.data?.detail || err?.message || "Something went wrong. Please try again.";

@@ -7,6 +7,7 @@ export default function AdminUsers() {
   const queryClient = useQueryClient();
   const [newEmail, setNewEmail] = useState("");
   const [newRole, setNewRole] = useState("USER");
+  const [newPassword, setNewPassword] = useState("");
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["admin-users"],
@@ -18,6 +19,7 @@ export default function AdminUsers() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-users"] });
       setNewEmail("");
+      setNewPassword("");
     }
   });
 
@@ -38,27 +40,42 @@ export default function AdminUsers() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-display font-bold text-text-primary">User Access</h2>
-          <p className="text-sm text-text-secondary mt-1">Manage who can access RETAILYNX via Google Auth.</p>
+          <p className="text-sm text-text-secondary mt-1">Manage who can access RETAILYNX via email &amp; password.</p>
         </div>
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm p-5">
         <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4">Add User</h3>
         <form
-          className="flex items-end gap-4"
+          className="flex items-end gap-4 flex-wrap"
           onSubmit={(e) => {
             e.preventDefault();
-            if (newEmail.trim()) addUser.mutate({ email: newEmail.trim(), role: newRole });
+            if (newEmail.trim())
+              addUser.mutate({
+                email: newEmail.trim(),
+                role: newRole,
+                password: newPassword || undefined,
+              });
           }}
         >
-          <div className="flex-1 space-y-1.5">
-            <label className="text-xs font-medium text-text-muted">Google Email</label>
+          <div className="flex-1 min-w-[220px] space-y-1.5">
+            <label className="text-xs font-medium text-text-muted">Email</label>
             <input
               type="email"
               required
               value={newEmail}
               onChange={e => setNewEmail(e.target.value)}
               placeholder="user@company.com"
+              className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+            />
+          </div>
+          <div className="flex-1 min-w-[200px] space-y-1.5">
+            <label className="text-xs font-medium text-text-muted">Password</label>
+            <input
+              type="text"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="Initial password (optional)"
               className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
             />
           </div>
