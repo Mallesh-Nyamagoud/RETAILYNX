@@ -1,169 +1,177 @@
-import os
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
-from authlib.integrations.starlette_client import OAuth
-from itsdangerous import URLSafeSerializer
+"""Authentication routes: username + password login with signed session cookies.
 
-from app.services.auth import get_user_by_email, get_user_by_id, get_all_users, add_user, update_user_status, remove_user, authenticate
+There is no Google/OAuth flow any more. The session is a signed (itsdangerous)
+cookie holding only the user id, which is re-checked against the database on
+every protected request - so disabling or deleting a user takes effect
+immediately, without waiting for the cookie to expire.
+
+Cookie flags:
+    HttpOnly     - JavaScript can never read the session token (XSS defence)
+    Secure       - only sent over HTTPS (enabled automatically in production)
+    SameSite=Lax - not sent on cross-site POSTs (CSRF defence), while still
+                   surviving a normal top-level navigation into the app
+"""
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from itsdangerous import BadSignature, URLSafeSerializer
+
+from app.core.config import IS_PRODUCTION, SESSION_SECRET_KEY
 from app.models.auth import LoginRequest, UserCreate, UserUpdate
+from app.services import auth as auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# --- Setup OAuth ---
-oauth = OAuth()
-oauth.register(
-    name='google',
-    client_id=os.environ.get("GOOGLE_CLIENT_ID", "dummy-dev-client-id"),
-    client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", "dummy-dev-client-secret"),
-    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-    client_kwargs={
-        'scope': 'openid email profile',
-        'prompt': 'select_account'
-    }
-)
-
-# Initialize Session serializer for tamper-proof cookies
-SECRET_KEY = os.environ.get("AUTH_SECRET_KEY", "dev-secret-key-replace-in-prod")
-serializer = URLSafeSerializer(SECRET_KEY)
-
 COOKIE_NAME = "retailynx_session"
+SESSION_MAX_AGE_SECONDS = 60 * 60 * 12  # 12 hours
+
+# Signing key for the session cookie. validate_startup_config() guarantees this
+# is present (and, in production, not the public placeholder) before we serve.
+serializer = URLSafeSerializer(SESSION_SECRET_KEY or "unsafe-dev-only-key")
 
 
-# --- Dependencies ---
+def _set_session_cookie(response: Response, user_id: int) -> None:
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=serializer.dumps(user_id),
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=IS_PRODUCTION,
+        samesite="lax",
+        path="/",
+    )
 
-def get_current_user(request: Request):
-    """Validates the session cookie and returns the active user."""
+
+# --- Dependencies ----------------------------------------------------------
+def get_current_user(request: Request) -> dict:
+    """Resolve the signed session cookie to an active user, else 401."""
     token = request.cookies.get(COOKIE_NAME)
     if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         user_id = serializer.loads(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid session")
-        
-    user = get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-        
+    except BadSignature:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+
+    user = auth_service.get_user_by_id(user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
     if not user["is_active"]:
-        raise HTTPException(status_code=403, detail="Your account is deactivated.")
-        
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Your account has been disabled")
     return user
 
 
-def get_current_admin(user = Depends(get_current_user)):
-    """Ensures the user is an admin."""
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+
+
+def get_current_admin(user: CurrentUser) -> dict:
+    """Admin-only guard for the "User Access" endpoints."""
     if user["role"] != "ADMIN":
-        raise HTTPException(status_code=403, detail="Admin access required")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
 
 
-# --- OAuth Routes ---
-
-@router.get("/login")
-async def login(request: Request):
-    """Initiates Google OAuth flow."""
-    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+CurrentAdmin = Annotated[dict, Depends(get_current_admin)]
 
 
-@router.get("/callback")
-async def callback(request: Request):
-    """Handles the callback from Google."""
-    try:
-        token = await oauth.google.authorize_access_token(request)
-        user_info = token.get('userinfo')
-        if not user_info:
-            raise Exception("No user info found")
-    except Exception as e:
-        return RedirectResponse(url="/login?error=oauth_failed")
-
-    email = user_info.get("email", "").lower()
-    user = get_user_by_email(email)
-    
-    if not user:
-        return RedirectResponse(url="/login?error=unauthorized_email")
-        
-    if not user["is_active"]:
-        return RedirectResponse(url="/login?error=deactivated")
-
-    # Success: issue tamper-proof cookie
-    session_token = serializer.dumps(user["id"])
-    
-    response = RedirectResponse(url="/")
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=session_token,
-        httponly=True,
-        secure=os.environ.get("ENVIRONMENT") == "production",
-        samesite="lax",
-        max_age=86400 * 7 # 7 days
-    )
-    return response
-
-
+# --- Session --------------------------------------------------------------
 @router.post("/login")
-async def password_login(data: LoginRequest, response: Response):
-    """Email + password login (used instead of Google sign-in).
-
-    On success it issues the SAME signed session cookie the Google flow uses,
-    so every protected route (get_current_user) keeps working unchanged.
-    """
-    user = authenticate(data.email, data.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    session_token = serializer.dumps(user["id"])
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=session_token,
-        httponly=True,
-        secure=os.environ.get("ENVIRONMENT") == "production",
-        samesite="lax",
-        max_age=86400 * 7,  # 7 days
-    )
+def login(payload: LoginRequest, response: Response) -> dict:
+    """Verify credentials and issue the signed session cookie."""
+    user = auth_service.authenticate(payload.username, payload.password)
+    if user is None:
+        # One message for every failure mode (unknown user, wrong password,
+        # disabled account, lockout) so the response cannot be used to probe
+        # which usernames exist.
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password"
+        )
+    _set_session_cookie(response, user["id"])
     return user
 
 
 @router.post("/logout")
-async def logout(response: Response):
-    """Clears the session."""
-    response.delete_cookie(COOKIE_NAME)
+def logout(response: Response) -> dict:
+    """Clear the session cookie."""
+    response.delete_cookie(COOKIE_NAME, path="/")
     return {"status": "ok"}
 
 
 @router.get("/me")
-async def get_me(user = Depends(get_current_user)):
-    """Returns the currently authenticated user."""
+def read_current_user(user: CurrentUser) -> dict:
+    """The currently signed-in user (used by the SPA on every page load)."""
     return user
 
 
-# --- Admin User Management Routes ---
-
+# --- Admin: User Access ---------------------------------------------------
 @router.get("/users")
-def list_users(admin = Depends(get_current_admin)):
-    return get_all_users()
+def list_users(admin: CurrentAdmin) -> list[dict]:
+    return auth_service.get_all_users()
 
 
-@router.post("/users")
-def create_user(data: UserCreate, admin = Depends(get_current_admin)):
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+def create_user(payload: UserCreate, admin: CurrentAdmin) -> dict:
     try:
-        return add_user(data.email, data.role, data.password)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return auth_service.add_user(payload.username, payload.role, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.put("/users/{user_id}")
-def update_user(user_id: int, data: UserUpdate, admin = Depends(get_current_admin)):
-    update_user_status(user_id, data.is_active)
-    return {"status": "ok"}
+def update_user(user_id: int, payload: UserUpdate, admin: CurrentAdmin) -> dict:
+    """Set/reset a password, change a role and/or enable-disable an account.
+
+    Guard rails: an admin cannot lock *themselves* out (demote or disable their
+    own account), and the last remaining admin can never be demoted or
+    disabled - otherwise nobody could manage users any more.
+    """
+    target = auth_service.get_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    is_self = target["id"] == admin["id"]
+    if is_self and payload.role is not None and payload.role != target["role"]:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="You cannot change your own role"
+        )
+    if is_self and payload.is_active is False:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="You cannot disable your own account"
+        )
+
+    demoting = payload.role is not None and payload.role != "ADMIN" and target["role"] == "ADMIN"
+    disabling = payload.is_active is False and target["role"] == "ADMIN"
+    if (demoting or disabling) and auth_service.count_admins(exclude_id=target["id"]) == 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="At least one ADMIN account must remain"
+        )
+
+    try:
+        if payload.role is not None:
+            auth_service.update_user_role(user_id, payload.role)
+        if payload.is_active is not None:
+            auth_service.update_user_status(user_id, payload.is_active)
+        if payload.password:
+            auth_service.set_password(user_id, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return auth_service.get_user_by_id(user_id) or {"status": "ok"}
 
 
 @router.delete("/users/{user_id}")
-def delete_user(user_id: int, admin = Depends(get_current_admin)):
-    # Prevent deleting oneself
-    if user_id == admin["id"]:
-        raise HTTPException(status_code=400, detail="Cannot remove your own account")
-    remove_user(user_id)
+def delete_user(user_id: int, admin: CurrentAdmin) -> dict:
+    target = auth_service.get_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+    if target["id"] == admin["id"]:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="You cannot remove your own account"
+        )
+    if target["role"] == "ADMIN" and auth_service.count_admins(exclude_id=target["id"]) == 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="At least one ADMIN account must remain"
+        )
+    auth_service.remove_user(user_id)
     return {"status": "ok"}

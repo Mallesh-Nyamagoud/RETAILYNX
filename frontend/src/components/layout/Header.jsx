@@ -89,8 +89,8 @@ export default function Header() {
           {showUserMenu && (
             <div className="absolute right-0 mt-2 w-60 bg-surface border border-border rounded-lg shadow-panel z-50 overflow-hidden">
               <div className="px-4 py-3 border-b border-border bg-base/50">
-                <div className="text-sm font-medium text-text-primary truncate" title={user?.email}>
-                  {user?.email || "User"}
+                <div className="text-sm font-medium text-text-primary truncate" title={user?.username}>
+                  {user?.username || "User"}
                 </div>
                 <div className="text-[10px] uppercase tracking-wider font-bold text-accent mt-1">
                   {user?.role || "USER"}

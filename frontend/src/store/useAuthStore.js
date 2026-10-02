@@ -14,8 +14,8 @@ export const useAuthStore = create((set) => ({
     }
   },
 
-  login: async (email, password) => {
-    const { data } = await http.post("/auth/login", { email, password });
+  login: async (username, password) => {
+    const { data } = await http.post("/auth/login", { username, password });
     set({ user: data, loading: false });
     return data;
   },

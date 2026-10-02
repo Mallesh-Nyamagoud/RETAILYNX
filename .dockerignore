@@ -7,22 +7,33 @@
 .git
 .gitignore
 
-# Secrets - configured as Render environment variables instead
+# --- Secrets: NEVER bake into an image. Cloud Run gets them from Secret
+# --- Manager / service env vars (see DEPLOY_GCP.md).
 .env
 **/.env
+.env.*
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/service-account*.json
 
 # Local build output (Docker rebuilds the SPA in stage 1)
 frontend/dist
 frontend/build
 
-# DuckDB: keep the seed DBs, drop the local working copies / auth db
-backend/data/*.duckdb
+# DuckDB: keep the seed DBs, drop the local working copies / auth db / WAL
 !backend/data/*_src.duckdb
 backend/data/*.duckdb.wal
-backend/data/auth.sqlite
+backend/data/*.db
+backend/data/*.db-journal
+backend/data/*.db-wal
 
 # Docs / scratch
 README.md
-DEPLOY.md
+DEPLOY_GCP.md
 **/*.log
 **/*_output.txt
+**/_*.cjs
+**/_*.js
+**/_*.png

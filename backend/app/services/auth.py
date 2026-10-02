@@ -1,43 +1,185 @@
-import os
+"""User accounts, password hashing and login throttling.
+
+Storage is chosen by ``DATABASE_URL``:
+
+* ``postgresql://`` / ``postgres://`` -> PostgreSQL. Cloud Run is deployed with
+  an external Postgres because a container's disk is ephemeral and would lose
+  every account (and every password reset) on each restart/scale event.
+* anything else (the default) -> a SQLite file under ``DATA_DIR``, which is the
+  zero-setup local-dev option.
+
+Only password *hashes* are ever stored - bcrypt (``$2b$...``). Hashes produced
+by the older PBKDF2 implementation are still accepted and are transparently
+upgraded to bcrypt on the next successful login, so an existing database keeps
+working with no migration step.
+"""
+from __future__ import annotations
+
 import hashlib
+import logging
+import os
 import secrets
-import sqlite3
-from typing import Optional
+import threading
+import time
+from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-# Use SQLite for simple, reliable local authentication storage
-# Separate from DuckDB analytics database
-AUTH_DB_PATH = Path(os.environ.get("AUTH_DB_PATH", Path(__file__).resolve().parent.parent.parent / "data" / "auth.sqlite"))
+import bcrypt
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    delete,
+    func,
+    insert,
+    select,
+    update,
+)
 
-# PBKDF2 parameters for password hashing (stdlib only - no extra dependency).
+from app.core.config import ADMIN_PASSWORD, ADMIN_USERNAME, DATABASE_URL
+
+log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Tunables
+# ---------------------------------------------------------------------------
+# bcrypt cost. 12 rounds costs roughly a quarter of a second on a Cloud Run
+# vCPU: slow enough to make offline cracking expensive, fast enough for an
+# interactive login. Overridable so slow local machines and the test-suite can
+# drop to the minimum.
+try:
+    BCRYPT_ROUNDS = max(4, min(15, int(os.environ.get("BCRYPT_ROUNDS", "12"))))
+except ValueError:
+    BCRYPT_ROUNDS = 12
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+# Failed-login throttle: after MAX_LOGIN_ATTEMPTS failures inside the attempt
+# window, the account is refused for LOGIN_LOCKOUT_SECONDS.
+MAX_LOGIN_ATTEMPTS = _int_env("MAX_LOGIN_ATTEMPTS", 5)
+LOGIN_LOCKOUT_SECONDS = _int_env("LOGIN_LOCKOUT_SECONDS", 900)
+LOGIN_ATTEMPT_WINDOW_SECONDS = _int_env("LOGIN_ATTEMPT_WINDOW_SECONDS", 900)
+
+# bcrypt only ever consumes the first 72 bytes of its input.
+_BCRYPT_MAX_BYTES = 72
+
+# Legacy PBKDF2 hashes (produced before the switch to bcrypt).
 _PBKDF2_ALGO = "pbkdf2_sha256"
-_PBKDF2_ITERATIONS = 260_000
 
-
-def get_db():
-    AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(AUTH_DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+VALID_ROLES = ("ADMIN", "USER")
+_USERNAME_MAX_LENGTH = 150
 
 
 # ---------------------------------------------------------------------------
-# Password hashing
+# Schema
 # ---------------------------------------------------------------------------
+metadata = MetaData()
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("username", String(_USERNAME_MAX_LENGTH), nullable=False, unique=True, index=True),
+    Column("role", String(20), nullable=False, server_default="USER"),
+    Column("is_active", Boolean, nullable=False, server_default="1"),
+    Column("password_hash", String(255)),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+)
+
+# One row per failed login. Kept deliberately tiny and pruned on every write.
+login_attempts = Table(
+    "login_attempts",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("username", String(_USERNAME_MAX_LENGTH), nullable=False, index=True),
+    Column("attempted_at", Integer, nullable=False),  # epoch seconds (portable)
+)
+
+
+def normalize_database_url(url: str) -> str:
+    """Make a bare ``postgres://`` URL usable by SQLAlchemy 2.x.
+
+    Cloud providers still hand out ``postgres://`` URLs, a scheme SQLAlchemy 2
+    dropped. Rewriting it to ``postgresql+psycopg://`` also pins the psycopg 3
+    driver explicitly instead of relying on dialect auto-detection.
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+_engine = None
+_engine_lock = threading.Lock()
+
+
+def get_engine():
+    """Process-wide SQLAlchemy engine for the user database (lazy singleton).
+
+    ``pool_pre_ping`` transparently replaces connections that a managed
+    Postgres (Cloud SQL) has dropped while the instance sat idle at
+    min-instances=0.
+    """
+    global _engine
+    if _engine is None:
+        with _engine_lock:
+            if _engine is None:
+                url = normalize_database_url(DATABASE_URL)
+                kwargs: dict[str, Any] = {"pool_pre_ping": True}
+                if url.startswith("sqlite"):
+                    db_path = url.split("///", 1)[-1]
+                    if db_path and db_path != ":memory:":
+                        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+                    # FastAPI serves requests from a threadpool.
+                    kwargs["connect_args"] = {"check_same_thread": False}
+                log.info("User database: %s", "PostgreSQL" if url.startswith("postgresql") else url)
+                _engine = create_engine(url, **kwargs)
+    return _engine
+
+
+# ---------------------------------------------------------------------------
+# Usernames & passwords
+# ---------------------------------------------------------------------------
+def normalize_username(username: str | None) -> str:
+    """Trim + lower-case a username so logins are case-insensitive."""
+    return (username or "").strip().lower()
+
+
+def _password_bytes(password: str) -> bytes:
+    """bcrypt only uses the first 72 bytes of its input (and rejects longer)."""
+    return password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
+
 
 def hash_password(password: str) -> str:
-    """Return a salted PBKDF2-HMAC-SHA256 hash string for `password`."""
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), bytes.fromhex(salt), _PBKDF2_ITERATIONS
-    )
-    return f"{_PBKDF2_ALGO}${_PBKDF2_ITERATIONS}${salt}${digest.hex()}"
+    """Return a salted bcrypt hash string for `password`."""
+    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt(BCRYPT_ROUNDS)).decode("ascii")
 
 
-def verify_password(password: str, stored: Optional[str]) -> bool:
-    """Constant-time check of `password` against a stored hash string."""
+def verify_password(password: str, stored: str | None) -> bool:
+    """Check `password` against a stored hash (bcrypt, or legacy PBKDF2)."""
     if not stored:
         return False
+    stored = stored.strip()
+    if stored.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            return bcrypt.checkpw(_password_bytes(password), stored.encode("ascii"))
+        except ValueError:
+            return False
+
+    # Legacy PBKDF2-HMAC-SHA256 hash from a pre-bcrypt deployment.
     try:
         algo, iterations, salt, digest = stored.split("$")
         if algo != _PBKDF2_ALGO:
@@ -50,142 +192,276 @@ def verify_password(password: str, stored: Optional[str]) -> bool:
     return secrets.compare_digest(expected.hex(), digest)
 
 
-def _public(row: Optional[sqlite3.Row]) -> Optional[dict]:
+def _needs_rehash(stored: str | None) -> bool:
+    """True for a missing/legacy/cheaper-than-configured hash."""
+    if not stored or not stored.startswith(("$2a$", "$2b$", "$2y$")):
+        return True
+    try:
+        return int(stored.split("$")[2]) < BCRYPT_ROUNDS
+    except (IndexError, ValueError):
+        return True
+
+
+def _public(row: Mapping | None) -> dict | None:
     """Row -> dict without the password hash (the hash never leaves the server)."""
     if row is None:
         return None
     data = dict(row)
     data.pop("password_hash", None)
+    if isinstance(data.get("created_at"), datetime):
+        data["created_at"] = data["created_at"].isoformat()
     return data
 
 
-def _admin_credentials() -> tuple:
-    """(email, password, source) for the bootstrap admin account.
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
+def init_db() -> None:
+    """Create the tables and seed the first ADMIN (exactly once)."""
+    engine = get_engine()
+    metadata.create_all(engine)
+    _bootstrap_admin(engine)
 
-    Blank env values are treated as *unset* (falling back to the defaults),
-    and surrounding whitespace is ignored - so a stray space in a setting can
-    never silently lock everyone out. The default password matches the app's
-    existing admin password.
+
+def _bootstrap_admin(engine) -> None:
+    """Create the bootstrap ADMIN from ADMIN_USERNAME / ADMIN_PASSWORD.
+
+    Only runs while NO admin exists, so changing the environment variables
+    after the first boot never silently resets a live administrator's password
+    (use the User Access screen for that instead).
     """
-    raw_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@company.com")
-    raw_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
-    email = (raw_email or "admin@company.com").strip().lower() or "admin@company.com"
-    password = (raw_password or "").strip() or "ADONIS@13719"
-    source = "env" if (raw_password or "").strip() else "default"
-    return email, password, source
-
-
-def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE NOT NULL,
-                role TEXT NOT NULL DEFAULT 'USER',
-                is_active BOOLEAN NOT NULL DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        # Migration: add the password_hash column to pre-existing databases.
-        existing = {r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
-        if "password_hash" not in existing:
-            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
-
-        # Bootstrap / repair the initial admin so there is always a way in.
-        # On Render's free tier the SQLite file is ephemeral and is recreated on
-        # every cold start, so this runs again each time the service wakes up.
-        # A startup line below confirms which admin account was seeded, and the
-        # password-hash column is repaired if a previous space/empty config left
-        # it blank.
-        admin_email, admin_password, admin_source = _admin_credentials()
-        row = conn.execute(
-            "SELECT id, password_hash FROM users WHERE email = ?", (admin_email,)
-        ).fetchone()
-
-        if row is None:
-            conn.execute(
-                "INSERT INTO users (email, role, password_hash) VALUES (?, 'ADMIN', ?)",
-                (admin_email, hash_password(admin_password)),
-            )
-            print(f"[auth] bootstrapped active admin '{admin_email}' (password: {admin_source})")
-        elif not (row["password_hash"] or "").strip():
-            # Existing admin with a blank/missing password - give it the
-            # configured one so password login works.
-            conn.execute(
-                "UPDATE users SET password_hash = ?, role = 'ADMIN', is_active = 1 WHERE id = ?",
-                (hash_password(admin_password), row["id"]),
-            )
-            print(f"[auth] repaired blank password for admin '{admin_email}' (password: {admin_source})")
-        else:
-            # Admin already healthy: make sure the bootstrap account can always
-            # sign in, even if an old deploy left it disabled.
-            conn.execute(
-                "UPDATE users SET email = ?, role = 'ADMIN', is_active = 1 WHERE id = ?",
-                (admin_email, row["id"]),
-            )
-        conn.commit()
-
-def get_user_by_email(email: str) -> Optional[dict]:
-    with get_db() as conn:
-        cursor = conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),))
-        row = cursor.fetchone()
-        return _public(row)
-
-def get_user_by_id(user_id: int) -> Optional[dict]:
-    with get_db() as conn:
-        cursor = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-        row = cursor.fetchone()
-        return _public(row)
-
-def get_all_users():
-    with get_db() as conn:
-        cursor = conn.execute("SELECT * FROM users ORDER BY created_at DESC")
-        return [_public(row) for row in cursor.fetchall()]
-
-def authenticate(email: str, password: str) -> Optional[dict]:
-    """Return the ACTIVE user when email + password are valid, else None."""
-    if not email or password is None:
-        return None
-    normalized_email = email.strip().lower()
-    with get_db() as conn:
-        row = conn.execute("SELECT * FROM users WHERE email = ?", (normalized_email,)).fetchone()
-    if row is None:
-        return None
-    record = dict(row)
-    if not record.get("is_active"):
-        return None
-    if not verify_password(password, record.get("password_hash")):
-        return None
-    record.pop("password_hash", None)
-    return record
-
-def add_user(email: str, role: str = "USER", password: Optional[str] = None):
-    with get_db() as conn:
-        try:
-            conn.execute(
-                "INSERT INTO users (email, role, password_hash) VALUES (?, ?, ?)",
-                (email.lower(), role, hash_password(password) if password else None),
-            )
-            conn.commit()
-            return get_user_by_email(email.lower())
-        except sqlite3.IntegrityError:
-            raise ValueError(f"User {email} already exists")
-
-def set_password(user_id: int, password: str):
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
-            (hash_password(password), user_id),
+    admin_username = normalize_username(ADMIN_USERNAME)
+    if not admin_username or not ADMIN_PASSWORD:
+        log.warning(
+            "ADMIN_USERNAME/ADMIN_PASSWORD not set - no bootstrap admin was created. "
+            "Set both and restart to seed the first administrator."
         )
-        conn.commit()
+        return
 
-def update_user_status(user_id: int, is_active: bool):
-    with get_db() as conn:
-        conn.execute("UPDATE users SET is_active = ? WHERE id = ?", (1 if is_active else 0, user_id))
-        conn.commit()
+    with engine.begin() as conn:
+        admin_count = conn.execute(
+            select(func.count()).select_from(users).where(users.c.role == "ADMIN")
+        ).scalar_one()
+        if admin_count:
+            log.info("An ADMIN already exists - leaving it untouched.")
+            return
+        existing = conn.execute(
+            select(users.c.id).where(func.lower(users.c.username) == admin_username)
+        ).first()
+        if existing is not None:
+            # A non-admin row occupies the bootstrap username: promote it.
+            conn.execute(
+                update(users)
+                .where(users.c.id == existing[0])
+                .values(role="ADMIN", is_active=True, password_hash=hash_password(ADMIN_PASSWORD))
+            )
+            log.info("Promoted existing user '%s' to the bootstrap ADMIN.", admin_username)
+            return
+        conn.execute(
+            insert(users).values(
+                username=admin_username,
+                role="ADMIN",
+                is_active=True,
+                password_hash=hash_password(ADMIN_PASSWORD),
+            )
+        )
+        log.info("Seeded the first ADMIN account '%s' from ADMIN_USERNAME.", admin_username)
 
-def remove_user(user_id: int):
-    with get_db() as conn:
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        conn.commit()
 
+# ---------------------------------------------------------------------------
+# Login throttling (a simple failed-attempt limit)
+# ---------------------------------------------------------------------------
+def _prune_attempts(conn, now: int) -> None:
+    """Drop attempt rows older than the counting window."""
+    conn.execute(
+        delete(login_attempts).where(
+            login_attempts.c.attempted_at < now - LOGIN_ATTEMPT_WINDOW_SECONDS
+        )
+    )
+
+
+def is_locked_out(username: str) -> bool:
+    """True while `username` is inside the failed-attempt lockout window."""
+    normalized = normalize_username(username)
+    if not normalized:
+        return False
+    now = int(time.time())
+    with get_engine().begin() as conn:
+        _prune_attempts(conn, now)
+        newest = conn.execute(
+            select(func.max(login_attempts.c.attempted_at)).where(
+                func.lower(login_attempts.c.username) == normalized
+            )
+        ).scalar()
+        if newest is None or newest < now - LOGIN_LOCKOUT_SECONDS:
+            return False
+        recent = conn.execute(
+            select(func.count())
+            .select_from(login_attempts)
+            .where(
+                func.lower(login_attempts.c.username) == normalized,
+                login_attempts.c.attempted_at >= now - LOGIN_ATTEMPT_WINDOW_SECONDS,
+            )
+        ).scalar_one()
+    return recent >= MAX_LOGIN_ATTEMPTS
+
+
+def record_failed_attempt(username: str) -> None:
+    """Remember one failed login (for known and unknown usernames alike, so the
+    lockout behaviour cannot be used to discover which accounts exist)."""
+    normalized = normalize_username(username)
+    if not normalized:
+        return
+    now = int(time.time())
+    with get_engine().begin() as conn:
+        conn.execute(insert(login_attempts).values(username=normalized, attempted_at=now))
+        _prune_attempts(conn, now)
+
+
+def clear_failed_attempts(username: str) -> None:
+    """Forget every failed login for `username` (successful login / admin reset)."""
+    normalized = normalize_username(username)
+    if not normalized:
+        return
+    with get_engine().begin() as conn:
+        conn.execute(
+            delete(login_attempts).where(func.lower(login_attempts.c.username) == normalized)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Queries
+# ---------------------------------------------------------------------------
+def _fetch(conn, *, user_id: int | None = None, username: str | None = None) -> dict | None:
+    stmt = select(users)
+    if user_id is not None:
+        stmt = stmt.where(users.c.id == user_id)
+    else:
+        stmt = stmt.where(func.lower(users.c.username) == normalize_username(username))
+    return _public(conn.execute(stmt).mappings().first())
+
+
+def get_user_by_username(username: str) -> dict | None:
+    with get_engine().begin() as conn:
+        return _fetch(conn, username=username)
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    with get_engine().begin() as conn:
+        return _fetch(conn, user_id=user_id)
+
+
+def get_all_users() -> list[dict]:
+    with get_engine().begin() as conn:
+        rows = conn.execute(select(users).order_by(users.c.id)).mappings().all()
+    return [_public(row) for row in rows]
+
+
+def authenticate(username: str, password: str) -> dict | None:
+    """Return the ACTIVE user when username + password are valid, else None.
+
+    A lockout (or a wrong password) always returns None so the caller can only
+    ever answer "invalid credentials" - it never leaks which half was wrong.
+    """
+    normalized = normalize_username(username)
+    if not normalized or not password:
+        return None
+    if is_locked_out(normalized):
+        log.warning("Login refused for '%s': too many failed attempts", normalized)
+        return None
+
+    with get_engine().begin() as conn:
+        row = conn.execute(
+            select(users).where(func.lower(users.c.username) == normalized)
+        ).mappings().first()
+
+    if row is None or not row["is_active"]:
+        record_failed_attempt(normalized)
+        return None
+    if not verify_password(password, row["password_hash"]):
+        record_failed_attempt(normalized)
+        return None
+
+    clear_failed_attempts(normalized)
+    # Transparently move a legacy (PBKDF2) or cheaper bcrypt hash up to the
+    # configured cost while we still hold the plaintext.
+    if _needs_rehash(row["password_hash"]):
+        set_password(row["id"], password)
+    return _public(row)
+
+
+# ---------------------------------------------------------------------------
+# Mutations (used by the Admin "User Access" screen)
+# ---------------------------------------------------------------------------
+def add_user(username: str, role: str = "USER", password: str | None = None) -> dict:
+    """Create a user. `password` may be omitted, but the account then cannot
+    sign in until an admin sets one."""
+    normalized = normalize_username(username)
+    if not normalized:
+        raise ValueError("Username is required")
+    if len(normalized) > _USERNAME_MAX_LENGTH:
+        raise ValueError(f"Username must be at most {_USERNAME_MAX_LENGTH} characters")
+    role = (role or "USER").upper()
+    if role not in VALID_ROLES:
+        raise ValueError(f"Role must be one of {', '.join(VALID_ROLES)}")
+
+    password_hash = hash_password(password) if password else None
+    try:
+        with get_engine().begin() as conn:
+            result = conn.execute(
+                insert(users).values(
+                    username=normalized, role=role, is_active=True, password_hash=password_hash
+                )
+            )
+            new_id = result.inserted_primary_key[0]
+    except Exception as exc:  # IntegrityError on both SQLite and PostgreSQL
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            raise ValueError(f"User '{normalized}' already exists") from exc
+        raise
+    created = get_user_by_id(new_id)
+    if created is None:  # pragma: no cover - defensive
+        raise RuntimeError("User was inserted but could not be read back")
+    return created
+
+
+def set_password(user_id: int, password: str) -> None:
+    """Set/reset a password and unlock the account (clears failed attempts)."""
+    new_hash = hash_password(password)
+    with get_engine().begin() as conn:
+        row = conn.execute(select(users.c.username).where(users.c.id == user_id)).first()
+        if row is None:
+            raise ValueError(f"No user with id {user_id}")
+        conn.execute(
+            update(users).where(users.c.id == user_id).values(password_hash=new_hash)
+        )
+    clear_failed_attempts(row[0])
+
+
+def update_user_role(user_id: int, role: str) -> None:
+    role = (role or "").upper()
+    if role not in VALID_ROLES:
+        raise ValueError(f"Role must be one of {', '.join(VALID_ROLES)}")
+    with get_engine().begin() as conn:
+        conn.execute(update(users).where(users.c.id == user_id).values(role=role))
+
+
+def update_user_status(user_id: int, is_active: bool) -> None:
+    with get_engine().begin() as conn:
+        conn.execute(update(users).where(users.c.id == user_id).values(is_active=bool(is_active)))
+
+
+def count_admins(exclude_id: int | None = None) -> int:
+    """How many ADMIN accounts there are (optionally ignoring one id)."""
+    stmt = select(func.count()).select_from(users).where(users.c.role == "ADMIN")
+    if exclude_id is not None:
+        stmt = stmt.where(users.c.id != exclude_id)
+    with get_engine().begin() as conn:
+        return int(conn.execute(stmt).scalar_one())
+
+
+def remove_user(user_id: int) -> None:
+    with get_engine().begin() as conn:
+        row = conn.execute(select(users.c.username).where(users.c.id == user_id)).first()
+        conn.execute(delete(users).where(users.c.id == user_id))
+    if row is not None:
+        clear_failed_attempts(row[0])

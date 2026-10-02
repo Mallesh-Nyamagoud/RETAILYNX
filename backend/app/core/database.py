@@ -23,9 +23,23 @@ from typing import Any
 import duckdb
 import pandas as pd
 
-from app.core.config import ATTACH_SCHEMAS, SEED_FILES, WORKING_DIR
+from app.core.config import (
+    ATTACH_SCHEMAS,
+    DEFAULT_TABLES,
+    DUCKDB_MEMORY_LIMIT,
+    DUCKDB_THREADS,
+    SEED_FILES,
+    WORKING_DIR,
+    parquet_files_for,
+)
 
 WORKING_FILES = {key: WORKING_DIR / f"{key}_working.duckdb" for key in SEED_FILES}
+
+# Parquet-backed datasets (optional). When DATA_DIR holds Parquet for a dataset,
+# DuckDB reads it directly with `read_parquet` - nothing is loaded into pandas
+# and no writable copy is needed, which is what lets a read-only Cloud Run
+# container serve data that lives outside the image.
+PARQUET_FILES: dict[str, list] = {key: parquet_files_for(key) for key in SEED_FILES}
 
 log = logging.getLogger(__name__)
 
@@ -88,11 +102,40 @@ def filter_key(filters: dict | None) -> tuple:
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
+def _store_master_is_writable() -> bool:
+    """True when store_master has a writable DuckDB copy.
+
+    Parquet-backed (read-only) and unavailable datasets return False - the
+    column bootstrap and the store-status enrichment are skipped for them
+    instead of raising on a read-only catalog.
+    """
+    return not PARQUET_FILES.get("store_master") and WORKING_FILES["store_master"].exists()
+
+
+def _apply_engine_settings(con: duckdb.DuckDBPyConnection) -> None:
+    """Bound DuckDB's memory and thread usage for a small container.
+
+    Cloud Run is configured with 2 GiB, so DuckDB is capped at 1 GB / 2 threads
+    (both overridable via DUCKDB_MEMORY_LIMIT / DUCKDB_THREADS): a heavy
+    aggregation spills to disk rather than getting the process OOM-killed.
+    """
+    con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
+    con.execute(f"SET threads = {DUCKDB_THREADS}")
+
+
 def _ensure_working_copies(force: bool = False) -> None:
-    """Copy seed databases into writable working copies if missing."""
+    """Copy seed databases into writable working copies if missing.
+
+    Parquet-backed datasets are skipped: they are read straight from DATA_DIR
+    and never need a writable copy.
+    """
     WORKING_DIR.mkdir(parents=True, exist_ok=True)
     for key, working_path in WORKING_FILES.items():
+        if PARQUET_FILES.get(key):
+            continue
         seed_path = SEED_FILES[key]
+        if not seed_path.exists():
+            continue
         wal_path = working_path.with_name(working_path.name + ".wal")
         if force or not working_path.exists():
             if working_path.exists():
@@ -102,13 +145,46 @@ def _ensure_working_copies(force: bool = False) -> None:
             shutil.copyfile(seed_path, working_path)
 
 
+def _attach_parquet(con: duckdb.DuckDBPyConnection, key: str, schema: str) -> None:
+    """Back `schema`.`<default table>` with a view over the DATA_DIR Parquet.
+
+    `ATTACH ':memory:' AS <schema>` supplies the named catalog, and the view
+    inside it reads the Parquet lazily - DuckDB only touches the row groups a
+    query actually needs, so a full table is never materialised in memory.
+    """
+    files = PARQUET_FILES[key]
+    con.execute(f"ATTACH ':memory:' AS {schema}")
+    paths = ", ".join(f"'{p.as_posix()}'" for p in files)
+    table = DEFAULT_TABLES[key]
+    con.execute(
+        f"CREATE OR REPLACE VIEW {schema}.{table} AS "
+        f"SELECT * FROM read_parquet([{paths}], union_by_name = true)"
+    )
+
+
 def _attach_all(con: duckdb.DuckDBPyConnection) -> None:
+    """Make every configured dataset queryable as its logical schema.
+
+    Preference order per dataset:
+      1. Parquet files in DATA_DIR   -> view over `read_parquet(...)`.
+      2. Writable copy of the seed   -> ATTACH (the local-dev default).
+      3. The committed seed file     -> ATTACH (read-only fallback).
+    """
     attached = {row[0] for row in con.execute("PRAGMA database_list").fetchall()}
     for key, schema in ATTACH_SCHEMAS.items():
         if schema in attached:
             continue
-        path = WORKING_FILES[key]
-        con.execute(f"ATTACH '{path.as_posix()}' AS {schema}")
+        if PARQUET_FILES.get(key):
+            _attach_parquet(con, key, schema)
+            continue
+        working_path = WORKING_FILES[key]
+        seed_path = SEED_FILES[key]
+        if working_path.exists():
+            con.execute(f"ATTACH '{working_path.as_posix()}' AS {schema}")
+        elif seed_path.exists():
+            con.execute(f"ATTACH '{seed_path.as_posix()}' AS {schema} (READ_ONLY)")
+        else:
+            log.warning("Dataset '%s' has no working copy, seed file or Parquet", key)
 
 
 def init_db(reset: bool = False, block_on_enrichment: bool = False) -> None:
@@ -147,8 +223,15 @@ def init_db(reset: bool = False, block_on_enrichment: bool = False) -> None:
         if _connection is None:
             catalog_path = ":memory:"  # Use in-memory DB for dev to avoid hot-reload file locks
             _connection = duckdb.connect(catalog_path)
+        _apply_engine_settings(_connection)
         _attach_all(_connection)
-        _bootstrap_store_master_columns(_connection)
+        if _store_master_is_writable():
+            _bootstrap_store_master_columns(_connection)
+        else:
+            log.info(
+                "store_master is not writable (Parquet-backed or read-only) - "
+                "skipping the ter_min_date/ter_max_date/store_status column bootstrap"
+            )
     if reset:
         # A factory reset swaps in fresh working databases -> drop every
         # memoised payload built from the previous ones.
@@ -176,6 +259,19 @@ def get_enrichment_status() -> dict:
 
 def _run_enrichment_background() -> None:
     global _enrichment_status
+    if not _store_master_is_writable():
+        # Read-only/Parquet mode: store_status & friends must already be
+        # materialised in the data (they cannot be written back), so there is
+        # nothing to recompute. Report "done" rather than an error so the UI
+        # does not show a permanent "computing" notice.
+        with _lock:
+            _enrichment_status = {
+                "state": "done",
+                "detail": "skipped: store_master is read-only (Parquet-backed)",
+                "updated": 0,
+                "max_tertiary_date": None,
+            }
+        return
     with _lock:
         _enrichment_status = {
             "state": "running",

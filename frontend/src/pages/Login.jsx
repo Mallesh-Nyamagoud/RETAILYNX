@@ -6,7 +6,7 @@ import { useAuthStore } from "../store/useAuthStore";
 export default function Login() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -16,7 +16,7 @@ export default function Login() {
     setError("");
     setSubmitting(true);
     try {
-      await login(email.trim(), password);
+      await login(username.trim(), password);
       navigate("/", { replace: true });
     } catch (err) {
       setError(err?.message || "Login failed. Please try again.");
@@ -47,14 +47,15 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-muted">Email</label>
+            <label className="text-xs font-medium text-text-muted">Username</label>
             <input
-              type="email"
+              type="text"
               required
               autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="user@company.com"
+              autoFocus
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="your username"
               className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent"
             />
           </div>

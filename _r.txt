@@ -1,0 +1,135 @@
+﻿FF.FF..FFF.FF........................................................... [ 40%]
+........................................................................ [ 80%]
+...................................                                      [100%]
+================================== FAILURES ===================================
+__ AuthApiTests.test_admin_can_create_disable_renable_change_role_and_delete __
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_admin_can_create_disable_renable_change_role_and_delete>
+
+    def test_admin_can_create_disable_renable_change_role_and_delete(self):
+        self._login()
+>       self.assertEqual(self.client.get("/api/auth/users").status_code, 200)
+E       AssertionError: 401 != 200
+
+tests\test_auth_api.py:123: AssertionError
+_____ AuthApiTests.test_admin_cannot_disable_or_demote_their_own_account ______
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_admin_cannot_disable_or_demote_their_own_account>
+
+    def test_admin_cannot_disable_or_demote_their_own_account(self):
+        self._login()
+        me = self.client.get("/api/auth/me").json()
+        self.assertEqual(
+>           self.client.put(f"/api/auth/users/{me['id']}", json={"is_active": False}).status_code, 400
+                                               ^^^^^^^^
+        )
+E       KeyError: 'id'
+
+tests\test_auth_api.py:177: KeyError
+______ AuthApiTests.test_disabled_user_session_stops_working_immediately ______
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_disabled_user_session_stops_working_immediately>
+
+    def test_disabled_user_session_stops_working_immediately(self):
+        user = auth.add_user("analyst", "USER", "pw123456")
+        self.assertTrue(self._login("analyst", "pw123456").status_code == 200)
+>       self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+E       AssertionError: 401 != 200
+
+tests\test_auth_api.py:105: AssertionError
+______________ AuthApiTests.test_duplicate_username_is_rejected _______________
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_duplicate_username_is_rejected>
+
+    def test_duplicate_username_is_rejected(self):
+        self._login()
+        payload = {"username": "analyst", "role": "USER", "password": "pw123456"}
+>       self.assertEqual(self.client.post("/api/auth/users", json=payload).status_code, 201)
+E       AssertionError: 401 != 201
+
+tests\test_auth_api.py:163: AssertionError
+_ AuthApiTests.test_last_admin_cannot_be_disabled_or_deleted_by_another_admin _
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_last_admin_cannot_be_disabled_or_deleted_by_another_admin>
+
+    def test_last_admin_cannot_be_disabled_or_deleted_by_another_admin(self):
+        self._login()
+        second = self.client.post(
+            "/api/auth/users", json={"username": "admin2", "role": "ADMIN", "password": "pw123456"}
+        ).json()
+        # Two admins exist, so demoting one is allowed...
+        self.assertEqual(
+>           self.client.put(f"/api/auth/users/{second['id']}", json={"role": "USER"}).status_code, 200
+                                               ^^^^^^^^^^^^
+        )
+E       KeyError: 'id'
+
+tests\test_auth_api.py:191: KeyError
+__________ AuthApiTests.test_login_sets_a_signed_httponly_lax_cookie __________
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_login_sets_a_signed_httponly_lax_cookie>
+
+    def test_login_sets_a_signed_httponly_lax_cookie(self):
+        response = self._login()
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["username"], ADMIN_USER)
+        self.assertEqual(body["role"], "ADMIN")
+        self.assertNotIn("password_hash", body)
+    
+        cookie_header = response.headers["set-cookie"]
+        self.assertIn("HttpOnly", cookie_header)
+        self.assertIn("SameSite=lax", cookie_header.replace("SameSite=Lax", "SameSite=lax"))
+        self.assertIn(f"{auth_routes.COOKIE_NAME}=", cookie_header)
+        # Development: the cookie must NOT be marked Secure, or a plain-http
+        # local browser would silently drop it.
+>       self.assertNotIn("Secure", cookie_header)
+E       AssertionError: 'Secure' unexpectedly found in 'retailynx_session=MQ.4loqFEFETeVpdVP-GrBkNkrw_lQ; HttpOnly; Max-Age=43200; Path=/; SameSite=lax; Secure'
+
+tests\test_auth_api.py:86: AssertionError
+_________________ AuthApiTests.test_login_then_me_then_logout _________________
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_login_then_me_then_logout>
+
+    def test_login_then_me_then_logout(self):
+        self.assertEqual(self._login().status_code, 200)
+        me = self.client.get("/api/auth/me")
+>       self.assertEqual(me.status_code, 200)
+E       AssertionError: 401 != 200
+
+tests\test_auth_api.py:91: AssertionError
+_____ AuthApiTests.test_non_admin_cannot_reach_the_user_access_endpoints ______
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_non_admin_cannot_reach_the_user_access_endpoints>
+
+    def test_non_admin_cannot_reach_the_user_access_endpoints(self):
+        auth.add_user("analyst", "USER", "pw123456")
+        self._login("analyst", "pw123456")
+>       self.assertEqual(self.client.get("/api/auth/users").status_code, 403)
+E       AssertionError: 401 != 403
+
+tests\test_auth_api.py:115: AssertionError
+________________ AuthApiTests.test_short_password_is_rejected _________________
+
+self = <tests.test_auth_api.AuthApiTests testMethod=test_short_password_is_rejected>
+
+    def test_short_password_is_rejected(self):
+        self._login()
+        response = self.client.post(
+            "/api/auth/users", json={"username": "analyst", "role": "USER", "password": "short"}
+        )
+>       self.assertEqual(response.status_code, 422)
+E       AssertionError: 401 != 422
+
+tests\test_auth_api.py:171: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_auth_api.py::AuthApiTests::test_admin_can_create_disable_renable_change_role_and_delete
+FAILED tests/test_auth_api.py::AuthApiTests::test_admin_cannot_disable_or_demote_their_own_account
+FAILED tests/test_auth_api.py::AuthApiTests::test_disabled_user_session_stops_working_immediately
+FAILED tests/test_auth_api.py::AuthApiTests::test_duplicate_username_is_rejected
+FAILED tests/test_auth_api.py::AuthApiTests::test_last_admin_cannot_be_disabled_or_deleted_by_another_admin
+FAILED tests/test_auth_api.py::AuthApiTests::test_login_sets_a_signed_httponly_lax_cookie
+FAILED tests/test_auth_api.py::AuthApiTests::test_login_then_me_then_logout
+FAILED tests/test_auth_api.py::AuthApiTests::test_non_admin_cannot_reach_the_user_access_endpoints
+FAILED tests/test_auth_api.py::AuthApiTests::test_short_password_is_rejected
+9 failed, 170 passed in 18.95s

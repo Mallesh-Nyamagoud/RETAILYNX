@@ -4,10 +4,19 @@
 #
 # The FastAPI backend serves the built React SPA from the SAME origin
 # (app/main.py mounts frontend/dist), which is required because the frontend
-# calls a relative "/api" and the OAuth session cookie is SameSite=Lax.
+# calls a relative "/api" and the session cookie is SameSite=Lax.
 #
-# Build:  docker build -t retail-analytics .
-# Run:    docker run -p 8000:8000 -e AUTH_SECRET_KEY=... retail-analytics
+# Build (locally):
+#   docker build -t retailynx .
+#
+# Run (locally) - see .env.example for every variable:
+#   docker run --rm -p 8080:8080 \
+#     -e SESSION_SECRET_KEY=dev-secret-key-replace-in-prod \
+#     -e ADMIN_USERNAME=admin -e ADMIN_PASSWORD=change-me-please \
+#     -e ENVIRONMENT=development retailynx
+#
+# On Cloud Run these values come from Secret Manager / service env vars.
+# See DEPLOY_GCP.md.
 
 # ---------------------------------------------------------------------------
 # Stage 1 - build the React (Vite) frontend
@@ -22,7 +31,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Stage 2 - FastAPI backend + the built SPA
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.11-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -43,7 +52,9 @@ COPY backend/ /app/backend/
 #   FRONTEND_DIST_DIR = <backend>/../frontend/dist  ->  /app/frontend/dist
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
-EXPOSE 8000
+# Cloud Run injects PORT (8080 by default); the fallback keeps a plain
+# `docker run` working too. A single worker keeps the one DuckDB connection
+# (and its 1 GB memory cap) predictable - Cloud Run scales by *instance*.
+EXPOSE 8080
 
-# Render injects $PORT; fall back to 8000 for a plain `docker run`.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --proxy-headers --forwarded-allow-ips=\"*\""]
