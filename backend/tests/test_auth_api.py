@@ -21,7 +21,7 @@ from app.main import app
 from app.services import auth
 
 ADMIN_USER = "mis@adonisgroup.in"
-ADMIN_PASS = "ADONIS@13719"
+ADMIN_PASS = "ADONIS@13919"
 
 
 class AuthApiTests(unittest.TestCase):
