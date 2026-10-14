@@ -101,6 +101,28 @@ def _active_door_count(rows):
     })
 
 
+def _active_doors_by_store_type(rows):
+    """Count active physical doors by Store Master store_type.
+
+    A door is active only when at least one brand is L2L, Annualized, or New.
+    Closed-only doors are excluded. Each door is counted once by store type.
+    """
+    sis_doors = set()
+    non_sis_doors = set()
+    for row in rows:
+        code = row.get("adonis_store_code")
+        if code is None or (row.get("store_status") or "NA").strip() not in ACTIVE_STATUSES:
+            continue
+        code = str(code)
+        store_type = (row.get("store_type") or "").strip().upper().replace(" ", "")
+        if store_type == "SIS":
+            sis_doors.add(code)
+        elif store_type == "NON-SIS":
+            non_sis_doors.add(code)
+    # Keep the classes exclusive if malformed data gives a door both types.
+    non_sis_doors -= sis_doors
+    return len(sis_doors), len(non_sis_doors)
+
 def _brand_summary_rows(rows):
     """BRAND-wise store status summary, grouped by BRAND NAME (not brand_code):
     Brand | Total Active Doors | L2L | Annualized | New | Non-SIS."""
@@ -134,9 +156,10 @@ def _counts_by_status(rows):
 
     counts = {status: len(codes) for status, codes in counts_by_status.items()}
     total_doors = len(unique_codes)
-    closed = counts.get("Closed", 0)
-    active_doors = total_doors - closed
-    counts["total_active_doors"] = active_doors
+    sis_doors, non_sis_doors = _active_doors_by_store_type(rows)
+    counts["total_active_doors"] = sis_doors + non_sis_doors
+    counts["sis_doors"] = sis_doors
+    counts["non_sis_doors"] = non_sis_doors
     counts["total_doors"] = total_doors
     return counts
 
@@ -255,6 +278,7 @@ def _kpis_cached(filters_key: tuple, _token: tuple) -> dict:
         SELECT
             adonis_store_code,
             COALESCE(brand, 'Unknown') AS brand,
+            COALESCE(store_type, '') AS store_type,
             COALESCE(store_status, 'NA') AS store_status
         FROM {SCHEMA}.{TABLE}
         WHERE 1=1 {filter_sql}
@@ -263,9 +287,12 @@ def _kpis_cached(filters_key: tuple, _token: tuple) -> dict:
     )
     rows = df.to_dict(orient="records")
     total_doors = len({r.get("adonis_store_code") for r in rows if r.get("adonis_store_code")})
+    sis_doors, non_sis_doors = _active_doors_by_store_type(rows)
 
     return {
-        "total_active_doors": _active_door_count(rows),
+        "total_active_doors": sis_doors + non_sis_doors,
+        "sis_doors": sis_doors,
+        "non_sis_doors": non_sis_doors,
         "total_doors": total_doors,
         "by_status": {
             status: _distinct_doors(rows, status)

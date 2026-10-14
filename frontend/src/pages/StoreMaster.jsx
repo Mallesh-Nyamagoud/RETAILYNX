@@ -107,7 +107,7 @@ export default function StoreMaster() {
         </Card>
       ) : (
         <>
-          {/* ONE KPI card: Total Active Doors - counted on ADONIS STORE CODE;
+          {/* ONE KPI card: Total Active Doors - active SIS and Non-SIS doors, counted once by ADONIS STORE CODE;
               a store with multiple brands counts ONCE if ANY ONE brand is
               L2L / Annualized / New, irrespective of how many brands exist. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
@@ -125,13 +125,13 @@ export default function StoreMaster() {
                     <p className="text-[13px] text-text-secondary tabular-nums font-medium">
                       <span className="text-text-muted font-semibold uppercase tracking-wide">SIS: </span>
                       <span className="text-teal">
-                        {((kpis.by_status?.L2L || 0) + (kpis.by_status?.Annualized || 0) + (kpis.by_status?.New || 0)).toLocaleString()}
+                        {(kpis.sis_doors || 0).toLocaleString()}
                       </span>
                     </p>
                     <p className="text-[13px] text-text-secondary tabular-nums font-medium">
                       <span className="text-text-muted font-semibold uppercase tracking-wide">NON-SIS: </span>
                       <span className="text-warn">
-                        {(kpis.by_status?.NA || 0).toLocaleString()}
+                        {(kpis.non_sis_doors || 0).toLocaleString()}
                       </span>
                     </p>
                   </div>
