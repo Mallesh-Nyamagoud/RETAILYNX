@@ -6,7 +6,6 @@ import { storeMasterApi } from "../../api/client";
 import { statusTone } from "../common/Badge";
 import Badge from "../common/Badge";
 
-const ADMIN_PASSWORD = "ADONIS@13719";
 const READ_ONLY_COLUMNS = new Set([
   "adonis_store_code",
   "brand_code",
@@ -29,7 +28,7 @@ export default function EditStoreModal({ row, columns, onClose }) {
 
   const mutation = useMutation({
     mutationFn: () => {
-      if (password !== ADMIN_PASSWORD) {
+      if (!password.trim()) {
         throw new Error("Admin password required to make changes.");
       }
       return storeMasterApi.update(row.adonis_store_code, row.brand_code, values, password);
@@ -48,7 +47,7 @@ export default function EditStoreModal({ row, columns, onClose }) {
           <div>
             <p className="font-display font-semibold text-text-primary">Edit Store</p>
             <p className="text-xs text-text-muted mt-0.5">
-              {row.adonis_store_code} · {row.brand_code}
+              {row.adonis_store_code} · {row.brand || "Unknown brand"}
             </p>
           </div>
           <button onClick={onClose} className="text-text-muted hover:text-text-primary">
@@ -79,9 +78,6 @@ export default function EditStoreModal({ row, columns, onClose }) {
               placeholder="Enter admin password"
               className="w-full px-3 py-2 rounded-lg border border-border-strong bg-surface text-sm text-text-primary outline-none focus:border-accent"
             />
-            {password && password !== ADMIN_PASSWORD && (
-              <p className="mt-1 text-[11px] text-negative">Password incorrect</p>
-            )}
           </div>
 
           {columns
@@ -112,7 +108,7 @@ export default function EditStoreModal({ row, columns, onClose }) {
             icon={Save}
             loading={mutation.isPending}
             onClick={() => {
-              if (password !== ADMIN_PASSWORD) {
+              if (!password.trim()) {
                 setPasswordError("Admin password required to make changes.");
                 return;
               }

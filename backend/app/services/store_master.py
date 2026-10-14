@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from functools import lru_cache
 from typing import Any
 
+from app.core.config import ADMIN_PASSWORD
 from app.core.database import (
     bump_data_revision,
     cache_token,
@@ -22,7 +23,6 @@ from app.core.database import (
 )
 
 SCHEMA, TABLE = "store_master", "store_details"
-ADMIN_PASSWORD = "ADONIS@13719"
 
 _NON_SLICER_COLUMNS = {"adonis_store_code", "brand_code", "ter_min_date", "ter_max_date"}
 

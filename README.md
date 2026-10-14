@@ -144,22 +144,29 @@ fact table.
 - `CFYTD` = current FY, April 1 → max date
 - `GROWTH %` = (CFYTD − LFYTD) / |LFYTD| × 100
 - `BALANCE` = LFY FULL − CFYTD
-- `LFAPM` = LFY FULL / 12
+- `LFAPM` = LFY FULL / the number of fiscal months from the first LFY sale
+  month through March (an annualized prior-year run rate; 12 months when sales
+  were present from April)
 - `LFYTD APM` = LFYTD (last FY, April 1 → the same date) / the elapsed months of
   that same window — the like-for-like twin of `CFAPM`
 - `CFAPM` = CFYTD / months elapsed in the current FY — computed **per brand
   code** (not per store, not globally) as the doc specifies, then summed as
   dimensions roll up, so it stays correct at every subtotal level
 - `APM GROWTH %` = (CFAPM − LFYTD APM) / |LFYTD APM| × 100
-- `TRENDING` = CFYTD ÷ days elapsed in current FY × total days in current FY
+- `TRENDING` uses last year's same-period sales pattern, adjusted by this
+  year's like-for-like performance: `CFYTD × (LFY FULL ÷ LFYTD)`. This
+  preserves last year's seasonality while applying the current year's growth.
+  When LFYTD is zero or negative, the ratio is not a reliable retail seasonal
+  index, so the calculation falls back to a straight-line run rate:
+  `CFYTD ÷ days elapsed × total days in current FY`.
 - `PROJ. GROWTH %` = (TRENDING − LFY FULL) / |LFY FULL| × 100
 - **Every growth figure divides by the ABSOLUTE value of its base** (`|LFYTD|`,
   `|LFY FULL|`, `|LFYTD APM|`, `|LFY of the month|`) so the sign always means
   *better / worse*. With a signed denominator a negative prior period silences
   the direction: LFY −₹1,93,047 → CFY +₹6,48,187 is a ₹8,41,234 gain, i.e.
   **+435.8 %**, not −435.8 %. Ratios that are not growth (Contribution %,
-  Discount %, ASP / AVG.MRP) deliberately keep the signed denominator, so their
-  sign still carries meaning.
+  Discount %, ASP / AVG.MRP) use the absolute denominator as well; the
+  numerator carries the sign for these ratios.
 - `CUMULATIVE` = running total of CFYTD, recomputed live in the browser
   whenever you re-sort the table (as required — this is intentionally a
   client-side calculation so it always matches what's on screen)
