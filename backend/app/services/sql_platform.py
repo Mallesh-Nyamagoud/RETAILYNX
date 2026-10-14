@@ -21,7 +21,7 @@ from app.core.config import (
     MAX_SQL_ROWS_PREVIEW,
     QUERY_TIMEOUT_SECONDS,
 )
-from app.core.database import get_connection
+from app.core.database import execute, execute_df, get_connection
 
 _executor = ThreadPoolExecutor(max_workers=4)
 
@@ -44,18 +44,16 @@ SQL_KEYWORDS = [
 def list_sql_functions() -> list[str]:
     """DuckDB's own function catalog - fully dynamic, grows/shrinks with the
     DuckDB version in use, never hard-coded."""
-    con = get_connection()
-    rows = con.execute(
+    rows = execute(
         "SELECT DISTINCT function_name FROM duckdb_functions() "
         "WHERE function_type IN ('scalar','aggregate','table') "
         "ORDER BY 1"
-    ).fetchall()
+    )
     return [r[0] for r in rows]
 
 
 def _run(sql: str) -> pd.DataFrame:
-    con = get_connection()
-    return con.execute(sql).fetchdf()
+    return execute_df(sql)
 
 
 def execute_query(sql: str, limit: int | None = None) -> dict:
@@ -96,6 +94,5 @@ def execute_query(sql: str, limit: int | None = None) -> dict:
 
 def execute_for_export(sql: str) -> pd.DataFrame:
     sql_clean = sql.strip().rstrip(";")
-    con = get_connection()
-    df = con.execute(f"SELECT * FROM ({sql_clean}) AS _q LIMIT {MAX_SQL_ROWS_EXPORT}").fetchdf()
+    df = execute_df(f"SELECT * FROM ({sql_clean}) AS _q LIMIT {MAX_SQL_ROWS_EXPORT}")
     return df
