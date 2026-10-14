@@ -287,6 +287,12 @@ def _join_ctes(
     params = season_params + filter_params + season_params + filter_params
 
     sql = f"""
+    brand_names AS (
+        SELECT brand_code, MIN(NULLIF(TRIM(brand), '')) AS brand_name
+        FROM {STORE_SCHEMA}.{STORE_TABLE}
+        GROUP BY brand_code
+        HAVING COUNT(DISTINCT NULLIF(TRIM(brand), '')) = 1
+    ),
     ord AS (
         -- ORDER side baseline: the complete original order, aggregated to
         -- (dimensions x cleaned Season x cleaned Style). CURRENTQUANTITY is
@@ -298,7 +304,7 @@ def _join_ctes(
             ,MAX(TRIM(o.style_code)) AS ps_display
             ,MAX({_norm_season('o.season')}) AS season_display
             ,MAX(TRIM(o.subcategory)) AS subcategory
-            ,MIN(COALESCE(sm.brand, o.brand_code)) AS brand_ref
+            ,MIN(COALESCE(brand_names.brand_name, NULLIF(TRIM(sm.brand), ''), 'Unmapped brand (' || CAST(o.brand_code AS VARCHAR) || ')')) AS brand_ref
             ,MAX(o.mrp) AS mrp_of
             ,MAX(o.mrp) * SUM(o.currentquantity) AS ordered_mrp_val
             ,SUM(o.currentquantity) AS ordered_qty
@@ -306,6 +312,8 @@ def _join_ctes(
         LEFT JOIN {STORE_SCHEMA}.{STORE_TABLE} sm
             ON o.adonis_store_code = sm.adonis_store_code
            AND o.brand_code = sm.brand_code
+        LEFT JOIN brand_names
+            ON o.brand_code = brand_names.brand_code
         WHERE o.style_code IS NOT NULL
           AND TRIM(o.style_code) <> ''
           {season_clause_ord}
@@ -323,7 +331,7 @@ def _join_ctes(
             ,MAX(TRIM(b.product_code_code)) AS code_display
             ,MAX({_norm_season('b.season')}) AS season_display
             ,MAX({_clean_text('b.product_desc')}) AS pdesc_clean
-            ,MIN(COALESCE(sm.brand, b.brand_code)) AS brand_ref
+            ,MIN(COALESCE(brand_names.brand_name, NULLIF(TRIM(sm.brand), ''), 'Unmapped brand (' || CAST(b.brand_code AS VARCHAR) || ')')) AS brand_ref
             ,MAX(b.mdp) AS mrp_of
             ,MAX(b.mdp) * SUM(b.qty) AS dispatched_mrp_val
             ,SUM(b.qty) AS dispatched_qty
@@ -331,6 +339,8 @@ def _join_ctes(
         LEFT JOIN {STORE_SCHEMA}.{STORE_TABLE} sm
             ON b.adonis_store_code = sm.adonis_store_code
            AND b.brand_code = sm.brand_code
+        LEFT JOIN brand_names
+            ON b.brand_code = brand_names.brand_code
         WHERE b.product_code_code IS NOT NULL
           AND TRIM(b.product_code_code) <> ''
           {season_clause_dis}
