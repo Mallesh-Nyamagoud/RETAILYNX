@@ -172,19 +172,20 @@ def _load_fact_rows() -> pd.DataFrame:
     """The WHOLE tertiary fact at (store + brand + category + sub-category +
     season) grain - pulled once and reused by every request."""
     def col(name: str) -> str:
-        return quote_ident(name) if column_exists(FACT_SCHEMA, FACT_TABLE, name) else "NULL"
+        # Keep a missing optional column as the SQL NULL expression; f.NULL is invalid.
+        return f"f.{quote_ident(name)}" if column_exists(FACT_SCHEMA, FACT_TABLE, name) else "NULL"
 
     sql = f"""
         SELECT
-            f.{col(STORE_COL)}        AS store_code,
-            f.{col(BRAND_CODE_COL)}   AS brand_code,
-            f.{col(CATEGORY_COL)}     AS category,
-            f.{col(SUBCATEGORY_COL)}  AS sub_category,
-            f.{col(SEASON_COL)}       AS season,
-            f.{col(DATE_COL)}         AS tx_date,
-            f.{col(QTY_COL)}          AS qty_val,
-            f.{col(VAL_COL)}          AS val_val,
-            f.{col(MRP_COL)}          AS mrp_val
+            {col(STORE_COL)}        AS store_code,
+            {col(BRAND_CODE_COL)}   AS brand_code,
+            {col(CATEGORY_COL)}     AS category,
+            {col(SUBCATEGORY_COL)}  AS sub_category,
+            {col(SEASON_COL)}       AS season,
+            {col(DATE_COL)}         AS tx_date,
+            {col(QTY_COL)}          AS qty_val,
+            {col(VAL_COL)}          AS val_val,
+            {col(MRP_COL)}          AS mrp_val
         FROM {FACT_SCHEMA}.{FACT_TABLE} f
     """
     df = execute_df(sql)

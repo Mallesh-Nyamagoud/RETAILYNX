@@ -754,13 +754,15 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
     return picked.length ? picked : DIM_DEFAULTS.hierarchy;
   }, [hierarchy, dimOptions]);
 
+  // Derive the default during render to avoid a duplicate request after hierarchy changes.
+  const effectiveDistDim = distTouched.current ? distDim : (rowHierarchy[0] || "all");
+
   const q = useQuery({
-    queryKey: [eyebrow, "bill-kpi-analysis", filters, rowHierarchy, distDim, topN],
-    queryFn: () => billKpiApi.analysis(filters, rowHierarchy, distDim, topN),
+    queryKey: [eyebrow, "bill-kpi-analysis", filters, rowHierarchy, effectiveDistDim, topN],
+    queryFn: () => billKpiApi.analysis(filters, rowHierarchy, effectiveDistDim, topN),
     placeholderData: (previousData) => previousData,
-    // Reuse the last payload for identical view-states within a short window
-    // (rapid filter toggling shouldn't re-hit the server for the same query).
-    staleTime: 5_000,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
   const labels = useMemo(
     () => Object.fromEntries(dimOptions.map((d) => [d.column, d.label])),
@@ -770,9 +772,7 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
   // Distribution rows follow the row-hierarchy selection (req §6/§7/§8):
   // Brand selected -> brand-level distribution rows, unless the user has
   // explicitly chosen a distribution dimension in the picker.
-  useEffect(() => {
-    if (!distTouched.current) setDistDim(rowHierarchy[0] || "all");
-  }, [rowHierarchy]);
+
 
   // The brand-mix column of the Top Bills table is store-scoped by request: it
   // appears as soon as ANY global slicer value is selected.
@@ -781,7 +781,7 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
     [filters]
   );
   const rowChain = rowHierarchy.map((d) => labels[d] || d).join(" > ");
-  const distDimLabel = distDim === "all" ? "All (overall buckets)" : labels[distDim] || distDim;
+  const distDimLabel = effectiveDistDim === "all" ? "All (overall buckets)" : labels[effectiveDistDim] || effectiveDistDim;
   const chain = (q.data?.summary?.dimensions || []).map((d) => labels[d] || d).join(" → ");
   const meta = q.data?.meta;
 
@@ -807,7 +807,7 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
           <div className="flex flex-wrap items-end gap-4">
             <DimSelect
               label="Distribution Dimension"
-              value={distDim}
+              value={effectiveDistDim}
               onChange={(v) => {
                 distTouched.current = true;
                 setDistDim(v || "all");

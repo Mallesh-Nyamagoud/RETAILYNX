@@ -253,6 +253,7 @@ export default function CategoryPerformance({ api, filters: globalFilters, hiera
     queryFn: () => api.categoryAnalysis(globalFilters, hierarchy),
     placeholderData: keepPreviousData,
     staleTime: 5 * 60_000,
+    retry: false,
   });
   const result = categoryQ.data;
   const categories = result?.categories || [];
