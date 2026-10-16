@@ -14,13 +14,9 @@ columns currently exist on store_master.store_details. So this module is
 written once, parameterised by which fact table/date column/qty & value
 expressions to use, and is not aware of "secondary" vs "tertiary" at all.
 
-CFAPM formula note ("BRAND LEVEL NOT STORE LEVEL"): the number of elapsed
-months used to annualise CFYTD is computed per BRAND CODE (months from the
-FY start to that brand's own max transaction date), not per store and not
-globally. To make that correct under arbitrary GROUP BY / ROLLUP levels,
-CFAPM is first computed at the finest (dims + brand_code) grain and then
-SUMMED across brands as dimensions are rolled up - which is mathematically
-equivalent to "annualised run-rate per brand, added together".
+APM denominators follow the active filter scope: overall, per brand,
+per store, or per brand-store pair. Per-scope values are computed before
+pivot rollups so every subtotal and grand total stays consistent.
 """
 from __future__ import annotations
 
@@ -193,28 +189,7 @@ def _apm_elapsed_months(ts) -> int:
 
 
 def _apm_month_map(fact: FactSpec, fy, filters: dict[str, list[str]]) -> pd.DataFrame:
-    """Per BRAND CODE (not per store - "brand level not store level"), the APM
-    month counts used to annualise that brand's sales:
-
-    - `months_cf` (CFAPM): ELAPSED months in the current FY, from the FY start
-      month to the month of that brand's LATEST CFY sale. So CFAPM =
-      CFYTD / months actually elapsed (e.g. data through July -> 4, not the
-      full 12). This is the README/module-doc formula "months elapsed in the
-      current FY" / "months from the FY start to that brand's max transaction
-      date". Broadcasting this single per-brand count to each of the brand's
-      store rows, then summing the annualised figures as dimensions roll up,
-      guarantees the brand-level (and grand) APM is exactly brand_CFYTD /
-      brand_elapsed_months.
-    - `months_pf` (LFAPM): months from that brand's FIRST prior-year sale
-      month through March (the LFY annualisation window).
-
-    Each is applied independently for CY and PY, and only over rows that
-    survive the active filters.
-
-    Memoised on (fact, FY window, filters, data token): this is a second
-    full-table aggregate behind every pivot, so a slicer change used to pay it
-    again in full.  The `_token` argument is only a cache key.
-    """
+    """Month denominators for the overall or selected Brand/Store scope."""
     return _apm_month_map_cached(fact, fy, filter_key(filters), cache_token())
 
 
@@ -222,51 +197,66 @@ def _apm_month_map(fact: FactSpec, fy, filters: dict[str, list[str]]) -> pd.Data
 def _apm_month_map_cached(
     fact: FactSpec, fy, filters_key: tuple, _token: tuple
 ) -> pd.DataFrame:
+    """Active month denominators at the selected overall/brand/store scope."""
     filters = {col: list(values) for col, values in filters_key}
     filter_sql, filter_params = _build_filter_sql(filters)
     store_q = quote_ident(fact.store_column)
     brand_q = quote_ident(fact.brand_column)
     date_q = quote_ident(fact.date_column)
 
+    selected = {str(k).lower() for k, values in filters.items() if values}
+    brand_scope = any("brand" in key for key in selected)
+    store_scope = any(key in {fact.store_column.lower(), "store_code", "store_name"} for key in selected)
+    scope_cols = []
+    if brand_scope:
+        scope_cols.append("brand_code")
+    if store_scope:
+        scope_cols.append("store_code")
+    select_scope = (", ".join(scope_cols) + ",") if scope_cols else "1 AS _scope,"
+    group_scope = ", ".join(scope_cols) if scope_cols else "1"
+
     sql = f"""
     WITH j AS (
-        SELECT
-            f.{store_q} AS store_code,
-            f.{brand_q} AS brand_code,
-            f.{date_q} AS tx_date
+        SELECT f.{store_q} AS store_code, f.{brand_q} AS brand_code,
+               f.{date_q} AS tx_date
         FROM {fact.schema}.{fact.table} f
         LEFT JOIN store_master.store_details dim
-            ON f.{store_q} = dim.adonis_store_code
-           AND f.{brand_q} = dim.brand_code
+          ON f.{store_q} = dim.adonis_store_code AND f.{brand_q} = dim.brand_code
         WHERE 1=1 {filter_sql}
           AND f.{date_q} BETWEEN ?::DATE AND ?::DATE
     )
-    SELECT
-        brand_code,
-        MAX(CASE WHEN tx_date BETWEEN ?::DATE AND ?::DATE THEN tx_date END) AS cf_last,
-        MIN(CASE WHEN tx_date BETWEEN ?::DATE AND ?::DATE THEN tx_date END) AS pf_first,
-        MAX(CASE WHEN tx_date BETWEEN ?::DATE AND ?::DATE THEN tx_date END) AS lfytd_last
-    FROM j
-    GROUP BY 1
+    SELECT {select_scope}
+      MIN(CASE WHEN tx_date BETWEEN ?::DATE AND ?::DATE THEN tx_date END) AS cf_first,
+      MIN(CASE WHEN tx_date BETWEEN ?::DATE AND ?::DATE THEN tx_date END) AS pf_first,
+      MIN(CASE WHEN tx_date BETWEEN ?::DATE AND ?::DATE THEN tx_date END) AS lfytd_first
+    FROM j GROUP BY {group_scope}
     """
-    params = (
-        filter_params
-        + [fy.last_fy_start, fy.current_fy_end]
-        + [fy.current_fy_start, fy.current_fy_end]
-        + [fy.last_fy_start, fy.last_fy_end]
-        + [fy.last_fy_start, fy.lfy_ytd_end]
-    )
+    params = (filter_params + [fy.last_fy_start, fy.current_fy_end]
+              + [fy.current_fy_start, fy.current_fy_end]
+              + [fy.last_fy_start, fy.last_fy_end]
+              + [fy.last_fy_start, fy.lfy_ytd_end])
     df = execute_df(sql, params)
     if df.empty:
         return df
-    df["cf_last"] = pd.to_datetime(df["cf_last"])
-    df["pf_first"] = pd.to_datetime(df["pf_first"])
-    df["lfytd_last"] = pd.to_datetime(df["lfytd_last"])
-    df["months_cf"] = df["cf_last"].apply(_apm_elapsed_months)
-    df["months_pf"] = df["pf_first"].apply(_apm_run_months)
-    df["months_lfytd"] = df["lfytd_last"].apply(_apm_elapsed_months)
-    return df[["brand_code", "months_cf", "months_pf", "months_lfytd"]]
+    for col in ("cf_first", "pf_first", "lfytd_first"):
+        df[col] = pd.to_datetime(df[col])
 
+    def active_months(first, end):
+        if first is None or pd.isna(first):
+            return 0
+        return max(0, _fiscal_month_index(end.month) - _fiscal_month_index(first.month) + 1)
+
+    # The unfiltered annual total is always a simple 12-month average. YTD
+    # overall denominators are the elapsed fiscal months in each YTD window.
+    if not scope_cols:
+        df["months_pf"] = 12
+        df["months_cf"] = _fiscal_month_index(fy.max_date.month)
+        df["months_lfytd"] = _fiscal_month_index(fy.lfy_ytd_end.month)
+    else:
+        df["months_pf"] = df["pf_first"].apply(_apm_run_months)
+        df["months_cf"] = df["cf_first"].apply(lambda d: active_months(d, fy.max_date))
+        df["months_lfytd"] = df["lfytd_first"].apply(lambda d: active_months(d, fy.lfy_ytd_end))
+    return df[scope_cols + ["months_cf", "months_pf", "months_lfytd"]]
 
 def _build_filter_sql(filters: dict[str, list[str]]) -> tuple[str, list[Any]]:
     clauses, params = [], []
@@ -361,23 +351,25 @@ def _pivot_cached(fact: FactSpec, dims_key: tuple, filters_key: tuple, _token: t
 
     brand_months = _apm_month_map(fact, fy, filters)
     if not brand_months.empty:
-        # Months are per BRAND_CODE; broadcast to each of the brand's store rows.
-        # Summing the annualised per-store figures during rollup then recovers
-        # the exact brand-level CFAPM (brand CFYTD / brand elapsed months).
-        fine_df = fine_df.merge(brand_months, on="brand_code", how="left")
+        selected = {str(k).lower() for k, values in filters.items() if values}
+        apm_keys = []
+        if any("brand" in key for key in selected):
+            apm_keys.append("brand_code")
+        if any(key in {fact.store_column.lower(), "store_code", "store_name"} for key in selected):
+            fine_df["store_code"] = fine_df["fine_store"]
+            apm_keys.append("store_code")
+        if apm_keys:
+            fine_df = fine_df.merge(brand_months, on=apm_keys, how="left")
+        else:
+            for col in ("months_cf", "months_pf", "months_lfytd"):
+                fine_df[col] = brand_months.iloc[0][col]
     else:
-        fine_df["months_cf"] = 0
-        fine_df["months_pf"] = 0
-        fine_df["months_lfytd"] = 0
+        fine_df["months_cf"] = fine_df["months_pf"] = fine_df["months_lfytd"] = 0
     fine_df["months_cf"] = fine_df["months_cf"].fillna(0)
     fine_df["months_pf"] = fine_df["months_pf"].fillna(0)
     fine_df["months_lfytd"] = fine_df["months_lfytd"].fillna(0)
 
-    # APM per Brand+Store = that combination's FY-window sales annualised:
-    #   CFAPM = CFYTD / months ELAPSED in the current FY (up to its latest sale);
-    #   LFAPM (pf) = LFY FULL / months from its first prior-year sale through March.
-    #   LFYTD APM = LFYTD / months ELAPSED in the prior FY (up to its latest sale).
-    # Zero month count (no sale in that FY) -> 0 APM via safe_div.
+    # Annualise at the selected scope: overall, brand, store, or brand/store.
     fine_df["brand_apm_qty"] = fine_df.apply(
         lambda r: safe_div(r["cfytd_qty"], r["months_cf"]), axis=1
     )
@@ -480,10 +472,8 @@ def _finalise_measures(df: pd.DataFrame, fy, dims: list[str]) -> list[dict]:
     )
     df["balance_qty"] = df["lfy_full_qty"] - df["cfytd_qty"]
     df["balance_val"] = df["lfy_full_val"] - df["cfytd_val"]
-    # LFAPM / CFAPM are already aggregated at the brand+store level (summed as
-    # dimensions roll up). CFAPM is annualised by the months ELAPSED in the
-    # current FY (CFYTD / elapsed months); LFAPM (PFAPM) by the prior-year
-    # window. PFAPM (prior FY) maps to the LFAPM column.
+    # Map the prior-FY APM field to LFAPM; the selected-scope denominator
+    # was applied before the dimension rollups.
     df["lfapm_qty"] = df["pfapm_qty"]
     df["lfapm_val"] = df["pfapm_val"]
     df["lfytd_apm_qty"] = df["lfytd_apm_qty"]

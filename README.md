@@ -144,15 +144,10 @@ fact table.
 - `CFYTD` = current FY, April 1 → max date
 - `GROWTH %` = (CFYTD − LFYTD) / |LFYTD| × 100
 - `BALANCE` = LFY FULL − CFYTD
-- `LFAPM` = LFY FULL / the number of fiscal months from the first LFY sale
-  month through March (an annualized prior-year run rate; 12 months when sales
-  were present from April)
-- `LFYTD APM` = LFYTD (last FY, April 1 → the same date) / the elapsed months of
-  that same window — the like-for-like twin of `CFAPM`
-- `CFAPM` = CFYTD / months elapsed in the current FY — computed **per brand
-  code** (not per store, not globally) as the doc specifies, then summed as
-  dimensions roll up, so it stays correct at every subtotal level
-- `APM GROWTH %` = (CFAPM − LFYTD APM) / |LFYTD APM| × 100
+- APM is calculated at the selected scope. With no Brand or Store filter, LFY FULL is divided by 12; LFYTD and CFYTD use their elapsed fiscal months.
+- With a Brand filter, averages are calculated per brand across its stores, using that brand's first sale month in each period. With a Store filter, they are calculated per store across brands. With both filters, they are calculated per Brand-Store pair.
+- YTD APM uses the active months from the first sale in that YTD window through its end date. Filter changes recalculate the scope and denominators.
+- APM GROWTH % = (CFAPM minus LFYTD APM) / absolute LFYTD APM times 100
 - `TRENDING` uses last year's same-period sales pattern, adjusted by this
   year's like-for-like performance: `CFYTD × (LFY FULL ÷ LFYTD)`. This
   preserves last year's seasonality while applying the current year's growth.
