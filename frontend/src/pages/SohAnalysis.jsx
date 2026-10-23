@@ -51,6 +51,7 @@ export default function SohAnalysis() {
     finally { setExporting(false); }
   };
   const rows = q.data?.rows || [];
+  const storeOptions = useMemo(() => [...new Set(rows.map((row) => row.store).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" })), [rows]);
   const visibleRows = useMemo(() => {
     const filtered = rows.filter((row) => COLUMNS.every(({ key, value }) => {
       const filter = (columnFilters[key] || "").trim().toLocaleLowerCase();
@@ -98,11 +99,11 @@ export default function SohAnalysis() {
             <button type="button" aria-label="Scroll table left" title="Scroll left" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: -520, behavior: "smooth" })}><ChevronLeft size={18} /></button>
             <button type="button" aria-label="Scroll table right" title="Scroll right" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: 520, behavior: "smooth" })}><ChevronRight size={18} /></button>
           </div>
-          <div ref={tableScrollRef} className="overflow-x-auto rounded border border-border scroll-smooth"><table className="w-full min-w-[1900px] text-sm">
+          <div ref={tableScrollRef} className="overflow-x-auto rounded border border-border scroll-smooth"><datalist id="soh-store-options">{storeOptions.map((store) => <option key={store} value={store} />)}</datalist><table className="w-full min-w-[1900px] text-sm">
             <thead className="sticky top-0 z-10 bg-surface"><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2 text-left" key={key}>
               <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap font-semibold hover:text-accent" onClick={() => toggleSort(key)}>{label}{sort.key === key ? (sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ChevronDown size={12} className="opacity-30" />}</button>
             </th>)}</tr><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2" key={key}>
-              <input aria-label={`Filter ${label}`} title={`Filter ${label}`} className="w-full min-w-24 rounded border border-border bg-base px-2 py-1 text-xs font-normal" placeholder="Filter..." value={columnFilters[key] || ""} onChange={(e) => setColumnFilters((current) => ({ ...current, [key]: e.target.value }))} />
+              <input aria-label={`Filter ${label}`} title={`Filter ${label}`} list={key === "store" ? "soh-store-options" : undefined} className="w-full min-w-24 rounded border border-border bg-base px-2 py-1 text-xs font-normal" placeholder={key === "store" ? "Search or select store..." : "Filter..."} value={columnFilters[key] || ""} onChange={(e) => setColumnFilters((current) => ({ ...current, [key]: e.target.value }))} />
             </th>)}</tr></thead>
             <tbody>{visibleRows.map((row, index) => <tr className="border-t border-border odd:bg-white/[0.03] hover:bg-white/[0.07]" key={`${row.store}-${row.brand}-${row.style}-${row.season}-${index}`}>
               {COLUMNS.map(({ key, value }) => <td className="p-2 whitespace-nowrap" key={key}>{value(row) ?? ""}</td>)}
