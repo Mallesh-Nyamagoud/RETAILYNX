@@ -1,10 +1,14 @@
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, StreamingResponse
 from app.api.routes.auth import get_current_user
 from app.services import soh_analysis
 from app.services.excel_export import build_workbook
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/soh", tags=["soh-analysis"], dependencies=[Depends(get_current_user)]
@@ -37,7 +41,24 @@ def summary(
         "store": store, "brand": brand, "category": category,
         "style": style, "season": season,
     }.items() if v}
-    return soh_analysis.get_summary(opening, ending, threshold, selected)
+    try:
+        result = soh_analysis.get_summary(opening, ending, threshold, selected)
+        # Encode while still in this handler so unsupported/null values become
+        # a logged fallback response instead of an opaque ASGI serialization 500.
+        return JSONResponse(content=jsonable_encoder(result))
+    except Exception:
+        log.exception("SOH summary request failed")
+        try:
+            available_dates = soh_analysis.get_dates()
+        except Exception:
+            log.exception("Could not load SOH dates for summary fallback")
+            available_dates = []
+        return JSONResponse(content={
+            "rows": [],
+            "dates": available_dates,
+            "warnings": [],
+            "error": "SOH summary could not be calculated. Try again; the failure was recorded in server logs.",
+        })
 
 
 

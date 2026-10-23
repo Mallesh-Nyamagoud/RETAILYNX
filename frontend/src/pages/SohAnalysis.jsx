@@ -113,11 +113,14 @@ export default function SohAnalysis() {
       {(q.data?.warnings || []).map((warning) => (
         <p key={warning} role="status" className="rounded border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">{warning}</p>
       ))}
+      {q.isError && q.data && <p role="alert" className="text-sm text-red-500">Refresh failed; showing the last loaded SOH results.</p>}
       {datesQ.isLoading || filtersQ.isLoading || q.isLoading ? (
         <Card><LoadingState label="Loading SOH analysis" rows={6} /></Card>
       ) : sourceError ? (
         <Card><ErrorState message={sourceError.message} onRetry={() => { datesQ.refetch(); filtersQ.refetch(); }} /></Card>
-      ) : q.isError ? (
+      ) : q.data?.error ? (
+        <Card><ErrorState message={q.data.error} onRetry={() => q.refetch()} /></Card>
+      ) : q.isError && !q.data ? (
         <Card><ErrorState message={q.error.message} onRetry={() => q.refetch()} /></Card>
       ) : rows.length === 0 ? (
         <Card><EmptyState title="No SOH rows match these selections" description="Adjust the month range, filters, or ST% threshold to see styles." /></Card>
