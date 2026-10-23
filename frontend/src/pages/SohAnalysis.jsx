@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { sohApi } from "../api/client";
@@ -25,10 +26,72 @@ const COLUMNS = [
   { key: "opening_soh_clearance", label: "Start SOH Clearance %", value: (r) => `${(r.opening_soh_clearance * 100).toFixed(1)}%` },
 ];
 
+function ColumnMultiFilter({ label, options, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+  const filteredOptions = useMemo(() => options.filter((option) => option.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())), [options, search]);
+  const shownOptions = filteredOptions.slice(0, 500);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOutside = (event) => {
+      if (!panelRef.current?.contains(event.target) && !triggerRef.current?.contains(event.target)) setOpen(false);
+    };
+    const closeEscape = (event) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [open]);
+
+  const toggleOption = (option) => onChange(selected.includes(option)
+    ? selected.filter((item) => item !== option)
+    : [...selected, option]);
+  const selectVisible = () => onChange([...new Set([...selected, ...shownOptions])]);
+  const openMenu = () => {
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPosition({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 296)), top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 380)) });
+    setOpen((current) => !current);
+  };
+
+  return (
+    <>
+      <button ref={triggerRef} type="button" aria-label={`Filter ${label}`} aria-expanded={open} onClick={openMenu}
+        className="flex w-full min-w-28 items-center justify-between gap-2 rounded border border-border bg-base px-2 py-1 text-left text-xs font-normal hover:border-accent">
+        <span className="truncate">{selected.length ? `${selected.length} selected` : "All"}</span><ChevronDown size={12} />
+      </button>
+      {open && createPortal(
+        <div ref={panelRef} role="dialog" aria-label={`${label} filter options`} style={{ position: "fixed", left: position.left, top: position.top, width: 280 }}
+          className="z-[1000] rounded-lg border border-border bg-surface p-3 shadow-2xl">
+          <input autoFocus aria-label={`Search ${label} options`} placeholder={`Search ${label}...`} value={search} onChange={(event) => setSearch(event.target.value)}
+            className="mb-2 w-full rounded border border-border bg-base px-2 py-2 text-sm" />
+          <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+            <button type="button" className="text-accent hover:underline" onClick={selectVisible}>Select visible ({shownOptions.length})</button>
+            <button type="button" className="text-text-muted hover:underline" onClick={() => onChange([])}>Clear</button>
+          </div>
+          <div className="max-h-64 overflow-y-auto border-y border-border py-1">
+            {shownOptions.map((option) => <label key={option} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-xs hover:bg-white/10">
+              <input type="checkbox" checked={selected.includes(option)} onChange={() => toggleOption(option)} />
+              <span className="truncate" title={option}>{option}</span>
+            </label>)}
+            {shownOptions.length === 0 && <p className="px-1 py-3 text-xs text-text-muted">No matching values.</p>}
+          </div>
+          <p className="pt-2 text-[11px] text-text-muted">{filteredOptions.length > shownOptions.length ? `Showing 500 of ${filteredOptions.length}; type to narrow.` : `${filteredOptions.length} values`}</p>
+          <button type="button" className="mt-2 w-full rounded bg-accent px-2 py-1.5 text-xs font-semibold text-white" onClick={() => setOpen(false)}>Done</button>
+        </div>, document.body,
+      )}
+    </>
+  );
+}
 export default function SohAnalysis() {
   const [opening, setOpening] = useState("");
   const [ending, setEnding] = useState("");
-  const [columnFilters, setColumnFilters] = useState({});
+  const [columnSelections, setColumnSelections] = useState({});
   const [rangeFilters, setRangeFilters] = useState({});
   const [sort, setSort] = useState({ key: "style", direction: "asc" });
   const [exporting, setExporting] = useState(false);
@@ -62,8 +125,8 @@ export default function SohAnalysis() {
         return (minText === "" || percent >= Number(minText))
           && (maxText === "" || percent <= Number(maxText));
       }
-      const filter = (columnFilters[key] || "").trim().toLocaleLowerCase();
-      return !filter || String(value(row) ?? "").toLocaleLowerCase().includes(filter);
+      const selected = columnSelections[key] || [];
+      return selected.length === 0 || selected.includes(String(value(row) ?? ""));
     }));
     const column = COLUMNS.find(({ key }) => key === sort.key);
     if (!column) return filtered;
@@ -74,7 +137,7 @@ export default function SohAnalysis() {
         ? an - bn : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
       return sort.direction === "asc" ? order : -order;
     });
-  }, [rows, columnFilters, rangeFilters, sort]);
+  }, [rows, columnSelections, rangeFilters, sort]);
   const sourceError = getSohSourceError(datesQ);
   const sourceRefreshFailed = hasSohSourceRefreshFailure(datesQ);
   const toggleSort = (key) => setSort((current) => ({
@@ -107,7 +170,7 @@ export default function SohAnalysis() {
             <button type="button" aria-label="Scroll table left" title="Scroll left" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: -520, behavior: "smooth" })}><ChevronLeft size={18} /></button>
             <button type="button" aria-label="Scroll table right" title="Scroll right" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: 520, behavior: "smooth" })}><ChevronRight size={18} /></button>
           </div>
-          <div ref={tableScrollRef} className="overflow-x-auto rounded border border-border scroll-smooth">{COLUMNS.filter(({ key }) => key !== "st_pct" && key !== "opening_soh_clearance").map(({ key }) => <datalist key={key} id={`soh-filter-${key}`}>{(filterOptions[key] || []).map((option) => <option key={option} value={option} />)}</datalist>)}<table className="w-full min-w-[1900px] text-sm">
+          <div ref={tableScrollRef} className="overflow-x-auto rounded border border-border scroll-smooth"><table className="w-full min-w-[1900px] text-sm">
             <thead className="sticky top-0 z-10 bg-surface"><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2 text-left" key={key}>
               <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap font-semibold hover:text-accent" onClick={() => toggleSort(key)}>{label}{sort.key === key ? (sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ChevronDown size={12} className="opacity-30" />}</button>
             </th>)}</tr><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2" key={key}>
@@ -117,7 +180,7 @@ export default function SohAnalysis() {
                   <input aria-label={`Maximum ${label}`} type="number" min="0" max="100" step="0.1" placeholder="Max %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.max ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], max: e.target.value } }))} />
                 </div>
               ) : (
-                <input aria-label={`Filter ${label}`} title={`Filter ${label}`} list={`soh-filter-${key}`} className="w-full min-w-24 rounded border border-border bg-base px-2 py-1 text-xs font-normal" placeholder="Search or select..." value={columnFilters[key] || ""} onChange={(e) => setColumnFilters((current) => ({ ...current, [key]: e.target.value }))} />
+                <ColumnMultiFilter label={label} options={filterOptions[key] || []} selected={columnSelections[key] || []} onChange={(selected) => setColumnSelections((current) => ({ ...current, [key]: selected }))} />
               )}
             </th>)}</tr></thead>
             <tbody>{visibleRows.map((row, index) => <tr className="border-t border-border odd:bg-white/[0.03] hover:bg-white/[0.07]" key={`${row.store}-${row.brand}-${row.style}-${row.season}-${index}`}>
