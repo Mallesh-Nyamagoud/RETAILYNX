@@ -228,58 +228,49 @@ def get_summary(
     warnings: list[str] = []
     df = _store_code_lookup(df, warnings)
 
-    # Tertiary is the retailer's actual point-of-sale data. Positive quantities
-    # are sales; negative lines are customer returns/reversals.
+    # Tertiary is actual point-of-sale data; signed returns reduce net sales.
     try:
         tertiary = execute_df("""
             select adonis_store_code as store_code, brand_code, "Style_Code" as style,
-                   "SEASON" as season,
-                   sum(case when qty > 0 then qty else 0 end) as sale,
-                   sum(case when qty < 0 then -qty else 0 end) as return_qty
+                   "SEASON" as season, sum(qty) as tertiary_net_sales
             from tertiary_data.data
             where cast(date as date)>cast(? as date) and cast(date as date)<=cast(? as date)
             group by all
         """, [opening, ending])
     except Exception:
         log.exception("Could not read tertiary sales for SOH analysis")
-        tertiary = pd.DataFrame(columns=["store", "brand_code", "style", "season", "sale", "return_qty"])
+        tertiary = pd.DataFrame(columns=["store", "brand_code", "style", "season", "tertiary_net_sales"])
         warnings.append("Tertiary sales could not be loaded; sales measures are shown as 0.")
     if tertiary.empty and not any("Tertiary sales could not be loaded" in w for w in warnings):
         warnings.append("No tertiary sales were found between the selected snapshots.")
-    df = _merge_measures(df, tertiary, ["sale", "return_qty"], "tertiary sales", warnings)
+    df = _merge_measures(df, tertiary, ["tertiary_net_sales"], "tertiary sales", warnings)
 
-    # Secondary is warehouse-to-retailer movement: positive quantity is sent to
-    # the retailer; negative quantity is returned from the retailer to WH.
+    # Positive secondary quantity transfers stock to store; negative returns it to WH.
     try:
         transfers = execute_df("""
             select adonis_store_code as store_code, brand_code, product_code_code as style,
-                   season,
-                   sum(case when qty > 0 then qty else 0 end) as transfer_in,
-                   sum(case when qty < 0 then -qty else 0 end) as transfer_out
+                   season, sum(qty) as secondary_movement
             from secondary_data.data
             where cast(bill_date as date)>cast(? as date) and cast(bill_date as date)<=cast(? as date)
             group by all
         """, [opening, ending])
     except Exception:
         log.exception("Could not read secondary stock transfers for SOH analysis")
-        transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "transfer_in", "transfer_out"])
+        transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "secondary_movement"])
         warnings.append("Secondary transfer data could not be loaded; transfer measures are shown as 0.")
     if transfers.empty and not any("Secondary transfer data could not be loaded" in w for w in warnings):
         warnings.append("No secondary stock transfers were found between the selected snapshots.")
-    df = _merge_measures(df, transfers, ["transfer_in", "transfer_out"], "secondary transfers", warnings)
+    df = _merge_measures(df, transfers, ["secondary_movement"], "secondary transfers", warnings)
 
-    df["net_sold"] = df.sale - df.return_qty
     style_keys = ["brand", "brand_code", "category", "style", "season"]
-    df["total_style_sold"] = df.groupby(style_keys)["net_sold"].transform("sum")
-    df["net_transfer"] = df.transfer_in - df.transfer_out
-    df["available_stock"] = (df.opening_soh + df.net_transfer).clip(lower=0)
-    df["st_pct"] = (df.net_sold / df.available_stock.replace(0, pd.NA)).clip(lower=0, upper=1).fillna(0)
+    df["total_style_net_sales"] = df.groupby(style_keys)["tertiary_net_sales"].transform("sum")
+    df["available_stock"] = (df.opening_soh + df.secondary_movement).clip(lower=0)
+    df["st_pct"] = (df.tertiary_net_sales / df.available_stock.replace(0, pd.NA)).clip(lower=0, upper=1).fillna(0)
     opening_available = df.opening_soh.clip(lower=0)
-    opening_clearance_qty = df[["net_sold"]].clip(lower=0)["net_sold"].where(
-        df.net_sold < opening_available, opening_available
+    opening_clearance_qty = df["tertiary_net_sales"].clip(lower=0).where(
+        df.tertiary_net_sales < opening_available, opening_available
     )
     df["opening_soh_clearance"] = (opening_clearance_qty / opening_available.replace(0, pd.NA)).fillna(0)
-    df["net_stock_movement"] = df.ending_soh - df.opening_soh - df.net_transfer + df.net_sold
     return {
         "rows": df[df.st_pct <= threshold].drop(columns=["store_code"], errors="ignore").fillna(0).to_dict("records"),
         "dates": get_dates(),
