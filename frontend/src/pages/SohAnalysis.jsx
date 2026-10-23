@@ -11,10 +11,10 @@ import { canLoadSohSummary, getSohSourceError, hasSohSourceRefreshFailure } from
 
 const COLUMNS = [
   { key: "store", label: "Store", value: (r) => r.store },
-  { key: "brand", label: "Brand", value: (r) => r.brand },
   { key: "category", label: "Category", value: (r) => r.category },
   { key: "style", label: "Style Code", value: (r) => r.style },
   { key: "season", label: "Season", value: (r) => r.season },
+  { key: "brand", label: "Brand", value: (r) => r.brand },
   { key: "opening_soh", label: "Start SOH", value: (r) => r.opening_soh },
   { key: "ending_soh", label: "End SOH", value: (r) => r.ending_soh },
   { key: "end_soh_sizewise", label: "End SOH Sizewise", value: (r) => r.end_soh_sizewise },
@@ -25,6 +25,22 @@ const COLUMNS = [
   { key: "st_pct", label: "ST%", value: (r) => `${(r.st_pct * 100).toFixed(1)}%` },
   { key: "opening_soh_clearance", label: "Start SOH Clearance %", value: (r) => `${(r.opening_soh_clearance * 100).toFixed(1)}%` },
 ];
+
+const FROZEN_COLUMN_WIDTHS = { store: 220, category: 200, style: 160, season: 130 };
+const FROZEN_OFFSETS = { store: 0, category: 220, style: 420, season: 580 };
+
+function frozenColumnStyle(key, header = false) {
+  const width = FROZEN_COLUMN_WIDTHS[key];
+  if (!width) return undefined;
+  return {
+    position: "sticky",
+    left: FROZEN_OFFSETS[key],
+    width,
+    minWidth: width,
+    backgroundColor: header ? "var(--color-surface)" : "var(--color-card)",
+    zIndex: header ? 40 : 10,
+  };
+}
 
 function ColumnMultiFilter({ label, options, selected, onChange }) {
   const [open, setOpen] = useState(false);
@@ -165,15 +181,23 @@ export default function SohAnalysis() {
         : q.isError && !q.data ? <Card><ErrorState message={q.error.message} onRetry={() => q.refetch()} /></Card>
         : rows.length === 0 ? <Card><EmptyState title="No SOH rows for these months" description="Choose a different opening and end month." /></Card>
         : <Card>
-          <div className="mb-2 flex items-center gap-2">
-            <span className="mr-auto text-xs text-text-muted">Showing {visibleRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows · Filter in each column; select a heading to sort.</span>
-            <button type="button" aria-label="Scroll table left" title="Scroll left" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: -520, behavior: "smooth" })}><ChevronLeft size={18} /></button>
-            <button type="button" aria-label="Scroll table right" title="Scroll right" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: 520, behavior: "smooth" })}><ChevronRight size={18} /></button>
+          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-base/50 p-3">
+            <div className="mr-auto min-w-48">
+              <p className="text-sm font-semibold text-text-primary">SOH Summary</p>
+              <p className="text-xs text-text-muted">Showing {visibleRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows. Filter columns and select headings to sort.</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1" aria-label="Summary navigation">
+              <button type="button" aria-label="Scroll summary up" title="Scroll up" className="rounded p-2 hover:bg-card-hover" onClick={() => tableScrollRef.current?.scrollBy({ top: -420, behavior: "smooth" })}><ChevronUp size={18} /></button>
+              <button type="button" aria-label="Scroll summary down" title="Scroll down" className="rounded p-2 hover:bg-card-hover" onClick={() => tableScrollRef.current?.scrollBy({ top: 420, behavior: "smooth" })}><ChevronDown size={18} /></button>
+              <span className="mx-1 h-6 border-l border-border" />
+              <button type="button" aria-label="Scroll summary left" title="Scroll left" className="rounded p-2 hover:bg-card-hover" onClick={() => tableScrollRef.current?.scrollBy({ left: -520, behavior: "smooth" })}><ChevronLeft size={18} /></button>
+              <button type="button" aria-label="Scroll summary right" title="Scroll right" className="rounded p-2 hover:bg-card-hover" onClick={() => tableScrollRef.current?.scrollBy({ left: 520, behavior: "smooth" })}><ChevronRight size={18} /></button>
+            </div>
           </div>
-          <div ref={tableScrollRef} className="overflow-x-auto rounded border border-border scroll-smooth"><table className="w-full min-w-[1900px] text-sm">
-            <thead className="sticky top-0 z-10 bg-surface"><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2 text-left" key={key}>
+          <div ref={tableScrollRef} className="h-[68vh] min-h-[380px] max-h-[720px] overflow-auto overscroll-contain rounded-xl border border-border bg-card shadow-inner scroll-smooth"><table className="w-full min-w-[2400px] text-sm">
+            <thead className="sticky top-0 z-30 bg-surface"><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2 text-left" style={frozenColumnStyle(key, true)} key={key}>
               <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap font-semibold hover:text-accent" onClick={() => toggleSort(key)}>{label}{sort.key === key ? (sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ChevronDown size={12} className="opacity-30" />}</button>
-            </th>)}</tr><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2" key={key}>
+            </th>)}</tr><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2" style={frozenColumnStyle(key, true)} key={key}>
               {key === "st_pct" || key === "opening_soh_clearance" ? (
                 <div className="flex min-w-36 gap-1">
                   <input aria-label={`Minimum ${label}`} type="number" step="0.1" placeholder="Min %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.min ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], min: e.target.value } }))} />
@@ -184,7 +208,7 @@ export default function SohAnalysis() {
               )}
             </th>)}</tr></thead>
             <tbody>{visibleRows.map((row, index) => <tr className="border-t border-border odd:bg-white/[0.03] hover:bg-white/[0.07]" key={`${row.store}-${row.brand}-${row.style}-${row.season}-${index}`}>
-              {COLUMNS.map(({ key, value }) => <td className="p-2 whitespace-nowrap" key={key}>{value(row) ?? ""}</td>)}
+              {COLUMNS.map(({ key, value }) => <td className="p-2 whitespace-nowrap" style={frozenColumnStyle(key)} key={key}>{value(row) ?? ""}</td>)}
             </tr>)}</tbody>
           </table></div>
           {visibleRows.length === 0 && <p className="py-8 text-center text-sm text-text-muted">No rows match these column filters. Clear a filter to see results.</p>}
