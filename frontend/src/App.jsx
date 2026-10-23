@@ -6,6 +6,7 @@ import TertiaryAnalysis from "./pages/TertiaryAnalysis";
 import StoreMaster from "./pages/StoreMaster";
 import SqlPlatform from "./pages/SqlPlatform";
 import CssStockTracking from "./pages/CssStockTracking";
+import SohAnalysis from "./pages/SohAnalysis";
 import AdminUsers from "./pages/AdminUsers";
 import Login from "./pages/Login";
 import { useAuthStore } from "./store/useAuthStore";
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="/store-master" element={<StoreMaster />} />
           <Route path="/sql-platform" element={<SqlPlatform />} />
           <Route path="/css-stock" element={<CssStockTracking />} />
+          <Route path="/soh" element={<SohAnalysis />} />
           <Route path="/admin/users" element={<ProtectedRoute requireAdmin><AdminUsers /></ProtectedRoute>} />
         </Route>
       </Routes>

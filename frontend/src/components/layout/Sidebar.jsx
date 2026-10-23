@@ -7,6 +7,7 @@ import {
   TerminalSquare,
   BarChart3,
   PackageSearch,
+  Boxes,
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { to: "/sql-platform", label: "SQL Platform", icon: TerminalSquare, numeral: "III" },
   { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3, numeral: "IV" },
   { to: "/css-stock", label: "Order-to-Transformation Tracker", icon: PackageSearch, numeral: "V" },
+  { to: "/soh", label: "SOH Analysis", icon: Boxes, numeral: "VI" },
 ];
 
 export default function Sidebar() {

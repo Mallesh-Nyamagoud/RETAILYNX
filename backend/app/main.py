@@ -29,6 +29,7 @@ from app.api.routes import (
     secondary,
     sql,
     store_master,
+    soh,
     tertiary,
 )
 from app.core.config import (
@@ -75,6 +76,7 @@ app.include_router(secondary.router, prefix=API_PREFIX)
 app.include_router(tertiary.router, prefix=API_PREFIX)
 app.include_router(store_master.router, prefix=API_PREFIX)
 app.include_router(css_stock.router, prefix=API_PREFIX)
+app.include_router(soh.router, prefix=API_PREFIX)
 app.include_router(bill_kpi.router, prefix=API_PREFIX)
 
 
