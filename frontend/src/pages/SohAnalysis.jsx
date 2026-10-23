@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { sohApi } from "../api/client";
 import PageHeader from "../components/layout/PageHeader";
@@ -23,15 +24,17 @@ const COLUMNS = [
   ["Style Code", (row) => row.style],
   ["Season", (row) => row.season],
   ["Opening SOH", (row) => row.opening_soh],
-  ["Gross Sold", (row) => row.sale],
-  ["Returns", (row) => row.return_qty],
+  ["Tertiary Sold", (row) => row.sale],
+  ["Tertiary Returns", (row) => row.return_qty],
   ["Net Sold", (row) => row.net_sold],
+  ["Transfer In (WH to Store)", (row) => row.transfer_in],
+  ["Return to WH", (row) => row.transfer_out],
+  ["Net Transfer", (row) => row.net_transfer],
   ["Total Style Sold", (row) => row.total_style_sold],
   ["End SOH Month", (row) => row.ending_soh],
   ["End SOH Sizewise", (row) => row.end_soh_sizewise],
   ["ST%", (row) => `${(row.st_pct * 100).toFixed(1)}%`],
-  ["Opening SOH Clearance", (row) => `${(row.opening_soh_clearance * 100).toFixed(1)}%`],
-  ["Net Stock Movement*", (row) => row.net_stock_movement],
+  ["Start SOH Clearance %", (row) => `${(row.opening_soh_clearance * 100).toFixed(1)}%`],
 ];
 
 export default function SohAnalysis() {
@@ -41,6 +44,7 @@ export default function SohAnalysis() {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const tableScrollRef = useRef(null);
   const datesQ = useQuery({ queryKey: ["soh", "dates"], queryFn: sohApi.dates });
   const filtersQ = useQuery({ queryKey: ["soh", "filters"], queryFn: sohApi.filters });
   const dates = datesQ.data?.dates || [];
@@ -130,13 +134,18 @@ export default function SohAnalysis() {
         <Card><EmptyState title="No SOH rows match these selections" description="Adjust the month range, filters, or ST% threshold to see styles." /></Card>
       ) : (
         <Card>
-          <div className="overflow-auto"><table className="w-full text-sm">
+          <div className="mb-2 flex items-center justify-end gap-2">
+            <span className="mr-auto text-xs text-text-muted">Use arrows or horizontal scroll to view all analysis columns.</span>
+            <button type="button" aria-label="Scroll table left" title="Scroll left" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: -520, behavior: "smooth" })}><ChevronLeft size={18} /></button>
+            <button type="button" aria-label="Scroll table right" title="Scroll right" className="rounded border border-border p-2" onClick={() => tableScrollRef.current?.scrollBy({ left: 520, behavior: "smooth" })}><ChevronRight size={18} /></button>
+          </div>
+          <div ref={tableScrollRef} className="overflow-x-auto scroll-smooth"><table className="w-full min-w-[1900px] text-sm">
             <thead><tr>{COLUMNS.map(([label]) => <th className="p-2 text-left" key={label}>{label}</th>)}</tr></thead>
             <tbody>{rows.map((row, index) => <tr className="border-t border-border" key={`${row.store}-${row.brand}-${row.style}-${row.season}-${index}`}>
               {COLUMNS.map(([label, value]) => <td className="p-2 whitespace-nowrap" key={label}>{value(row) ?? "?"}</td>)}
             </tr>)}</tbody>
           </table></div>
-          <p className="mt-3 text-xs text-text-muted">* Net stock movement is the balance change after net sales. The available files contain Sales and Return records but no stock-transfer ledger, so transfers cannot be confirmed from this report.</p>
+          <p className="mt-3 text-xs text-text-muted">Sales are from tertiary data. Positive secondary quantity is transfer from WH to store; negative quantity is return from store to WH. Start SOH clearance assumes opening stock sells first and is capped at 100%.</p>
         </Card>
       )}
     </div>

@@ -51,12 +51,22 @@ class SohAnalysisLogicTests(unittest.TestCase):
         self.assertEqual(options["season"], ["SEASON-1"])
 
     def test_monthly_style_sales_returns_stock_and_size_breakdown(self):
-        billing = pd.DataFrame([
-            ["STORE A", "B1", "STYLE-1", "SEASON-1", 3, 1],
-            ["STORE B", "B1", "STYLE-1", "SEASON-1", 4, 0],
-        ], columns=["store", "brand_code", "style", "season", "sale", "return_qty"])
-        with patch.object(soh_analysis, "execute_df", return_value=billing):
+        tertiary = pd.DataFrame([
+            ["STORE A", "STORE-A", "B1", "STYLE-1", "OLD-SEASON", 3, 1],
+            ["STORE B", "STORE-B", "B1", "STYLE-1", "SEASON-1", 4, 0],
+        ], columns=["store", "store_code", "brand_code", "style", "season", "sale", "return_qty"])
+        transfers = pd.DataFrame([
+            ["STORE A", "STORE-A", "B1", "STYLE-1", "OLD-SEASON", 3, 1],
+            ["STORE B", "STORE-B", "B1", "STYLE-1", "SEASON-1", 0, 0],
+        ], columns=["store", "store_code", "brand_code", "style", "season", "transfer_in", "transfer_out"])
+        mapping = pd.DataFrame([
+            ["STORE A", "B1", "STORE-A"], ["STORE B", "B1", "STORE-B"],
+        ], columns=["master_store", "brand_code", "store_code"])
+        with patch.object(soh_analysis, "execute_df", side_effect=[mapping, tertiary, transfers]) as execute:
             result = soh_analysis.get_summary("2026-07-01", "2026-09-01")
+        self.assertIn("store_master.store_details", execute.call_args_list[0].args[0])
+        self.assertIn("tertiary_data.data", execute.call_args_list[1].args[0])
+        self.assertIn("secondary_data.data", execute.call_args_list[2].args[0])
 
         self.assertEqual(len(result["rows"]), 2)
         store_a = next(row for row in result["rows"] if row["store"] == "STORE A")
@@ -66,15 +76,20 @@ class SohAnalysisLogicTests(unittest.TestCase):
         self.assertEqual(store_a["total_style_sold"], 6)
         self.assertEqual(store_a["ending_soh"], 3)
         self.assertEqual(store_a["end_soh_sizewise"], "M-1, S-2")
-        self.assertAlmostEqual(store_a["st_pct"], 0.4)
+        self.assertEqual((store_a["transfer_in"], store_a["transfer_out"], store_a["net_transfer"]), (3, 1, 2))
+        self.assertAlmostEqual(store_a["st_pct"], 0.2)
         self.assertAlmostEqual(store_a["opening_soh_clearance"], 0.25)
-        self.assertEqual(store_a["net_stock_movement"], -3)
+        self.assertEqual(store_a["net_stock_movement"], -5)
         self.assertEqual(store_b["total_style_sold"], 6)
-        self.assertAlmostEqual(store_b["st_pct"], 4 / 6)
+        self.assertAlmostEqual(store_b["st_pct"], 1.0)
 
     def test_same_snapshot_period_has_zero_intervening_sales(self):
-        empty_billing = pd.DataFrame(columns=["store", "brand_code", "style", "season", "sale", "return_qty"])
-        with patch.object(soh_analysis, "execute_df", return_value=empty_billing):
+        mapping = pd.DataFrame([
+            ["STORE A", "B1", "STORE-A"], ["STORE B", "B1", "STORE-B"],
+        ], columns=["master_store", "brand_code", "store_code"])
+        empty_sales = pd.DataFrame(columns=["store", "brand_code", "style", "season", "sale", "return_qty"])
+        empty_transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "transfer_in", "transfer_out"])
+        with patch.object(soh_analysis, "execute_df", side_effect=[mapping, empty_sales, empty_transfers]):
             result = soh_analysis.get_summary("2026-07-01", "2026-07-01")
         row = next(row for row in result["rows"] if row["store"] == "STORE A")
         self.assertEqual(row["sale"], 0)
@@ -83,11 +98,16 @@ class SohAnalysisLogicTests(unittest.TestCase):
         self.assertEqual(row["opening_soh"], row["ending_soh"])
 
     def test_missing_sales_source_keeps_stock_and_warns(self):
-        with patch.object(soh_analysis, "execute_df", side_effect=RuntimeError("source unavailable")):
+        mapping = pd.DataFrame([
+            ["STORE A", "B1", "STORE-A"], ["STORE B", "B1", "STORE-B"],
+        ], columns=["master_store", "brand_code", "store_code"])
+        empty_transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "transfer_in", "transfer_out"])
+        with patch.object(soh_analysis, "execute_df", side_effect=[mapping, RuntimeError("source unavailable"), empty_transfers]):
             result = soh_analysis.get_summary("2026-07-01", "2026-09-01")
         self.assertTrue(result["rows"])
         self.assertEqual(result["rows"][0]["sale"], 0)
         self.assertTrue(any("could not be loaded" in warning for warning in result["warnings"]))
+        self.assertEqual(result["rows"][0]["transfer_in"], 0)
 
 
 if __name__ == "__main__":
