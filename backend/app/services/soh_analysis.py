@@ -43,7 +43,7 @@ def get_filter_options() -> dict[str, list[str]]:
     with duckdb.connect(str(SOH_DB), read_only=True) as con:
         for key, column in FILTER_FIELDS.items():
             options[key] = [row[0] for row in con.execute(
-                f"select distinct trim(cast({column} as varchar)) value from data "
+                f"select distinct trim(cast({column} as varchar)) as option_value from data "
                 f"where {column} is not null and trim(cast({column} as varchar))<>'' "
                 "order by 1"
             ).fetchall()]

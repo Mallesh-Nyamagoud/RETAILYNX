@@ -1,0 +1,94 @@
+"""SOH month-to-month calculation regression cases."""
+import os
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import duckdb
+import pandas as pd
+
+from app.services import soh_analysis
+
+
+class SohAnalysisLogicTests(unittest.TestCase):
+    def setUp(self):
+        handle, self.path = tempfile.mkstemp(suffix=".duckdb")
+        os.close(handle)
+        os.remove(self.path)
+        self.previous_db = soh_analysis.SOH_DB
+        soh_analysis.SOH_DB = type(self.previous_db)(self.path)
+        with duckdb.connect(self.path) as con:
+            con.execute("""create table data (
+                date timestamp, name varchar, brand varchar, code varchar,
+                gc varchar, pc9 varchar, season varchar, correct_size varchar,
+                qty bigint, mrp double
+            )""")
+            rows = [
+                ("2026-07-01", "STORE A", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "S", 5, 100.0),
+                ("2026-07-01", "STORE A", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "S", 1, 100.0),
+                ("2026-07-01", "STORE A", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "M", 2, 100.0),
+                ("2026-09-01", "STORE A", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "S", 1, 100.0),
+                ("2026-09-01", "STORE A", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "S", 1, 100.0),
+                ("2026-09-01", "STORE A", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "M", 1, 100.0),
+                ("2026-07-01", "STORE B", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "M", 4, 100.0),
+                ("2026-09-01", "STORE B", "BRAND", "B1", "CAT", "STYLE-1", "SEASON-1", "M", 2, 100.0),
+            ]
+            con.executemany("insert into data values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+    def tearDown(self):
+        soh_analysis.SOH_DB = self.previous_db
+        try:
+            os.remove(self.path)
+        except FileNotFoundError:
+            pass
+
+    def test_filter_options_query_returns_values_for_all_dimensions(self):
+        options = soh_analysis.get_filter_options()
+        self.assertEqual(options["store"], ["STORE A", "STORE B"])
+        self.assertEqual(options["brand"], ["BRAND"])
+        self.assertEqual(options["category"], ["CAT"])
+        self.assertEqual(options["style"], ["STYLE-1"])
+        self.assertEqual(options["season"], ["SEASON-1"])
+
+    def test_monthly_style_sales_returns_stock_and_size_breakdown(self):
+        billing = pd.DataFrame([
+            ["STORE A", "B1", "STYLE-1", "SEASON-1", 3, 1],
+            ["STORE B", "B1", "STYLE-1", "SEASON-1", 4, 0],
+        ], columns=["store", "brand_code", "style", "season", "sale", "return_qty"])
+        with patch.object(soh_analysis, "execute_df", return_value=billing):
+            result = soh_analysis.get_summary("2026-07-01", "2026-09-01")
+
+        self.assertEqual(len(result["rows"]), 2)
+        store_a = next(row for row in result["rows"] if row["store"] == "STORE A")
+        store_b = next(row for row in result["rows"] if row["store"] == "STORE B")
+        self.assertEqual((store_a["category"], store_a["style"], store_a["season"]), ("CAT", "STYLE-1", "SEASON-1"))
+        self.assertEqual((store_a["opening_soh"], store_a["sale"], store_a["return_qty"], store_a["net_sold"]), (8, 3, 1, 2))
+        self.assertEqual(store_a["total_style_sold"], 6)
+        self.assertEqual(store_a["ending_soh"], 3)
+        self.assertEqual(store_a["end_soh_sizewise"], "M-1, S-2")
+        self.assertAlmostEqual(store_a["st_pct"], 0.4)
+        self.assertAlmostEqual(store_a["opening_soh_clearance"], 0.25)
+        self.assertEqual(store_a["net_stock_movement"], -3)
+        self.assertEqual(store_b["total_style_sold"], 6)
+        self.assertAlmostEqual(store_b["st_pct"], 4 / 6)
+
+    def test_same_snapshot_period_has_zero_intervening_sales(self):
+        empty_billing = pd.DataFrame(columns=["store", "brand_code", "style", "season", "sale", "return_qty"])
+        with patch.object(soh_analysis, "execute_df", return_value=empty_billing):
+            result = soh_analysis.get_summary("2026-07-01", "2026-07-01")
+        row = next(row for row in result["rows"] if row["store"] == "STORE A")
+        self.assertEqual(row["sale"], 0)
+        self.assertEqual(row["return_qty"], 0)
+        self.assertEqual(row["net_sold"], 0)
+        self.assertEqual(row["opening_soh"], row["ending_soh"])
+
+    def test_missing_sales_source_keeps_stock_and_warns(self):
+        with patch.object(soh_analysis, "execute_df", side_effect=RuntimeError("source unavailable")):
+            result = soh_analysis.get_summary("2026-07-01", "2026-09-01")
+        self.assertTrue(result["rows"])
+        self.assertEqual(result["rows"][0]["sale"], 0)
+        self.assertTrue(any("could not be loaded" in warning for warning in result["warnings"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

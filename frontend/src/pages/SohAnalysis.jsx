@@ -5,6 +5,7 @@ import PageHeader from "../components/layout/PageHeader";
 import Card from "../components/common/Card";
 import { ExportButton } from "../components/common/ExportButton";
 import { EmptyState, ErrorState, LoadingState } from "../components/common/LoadingState";
+import { canLoadSohSummary, getSohSourceError, hasSohSourceRefreshFailure } from "../utils/sohQueryState.js";
 
 const FILTER_LABELS = {
   store: "Store",
@@ -57,7 +58,7 @@ export default function SohAnalysis() {
   );
   const q = useQuery({
     queryKey: ["soh", "summary", params],
-    enabled: !!start && !!end && !datesQ.isError && !filtersQ.isError,
+    enabled: canLoadSohSummary(datesQ, filtersQ, start, end),
     queryFn: () => sohApi.summary(params),
   });
   const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
@@ -73,7 +74,8 @@ export default function SohAnalysis() {
     }
   };
   const rows = q.data?.rows || [];
-  const sourceError = datesQ.error || filtersQ.error;
+  const sourceError = getSohSourceError(datesQ, filtersQ);
+  const sourceRefreshFailed = hasSohSourceRefreshFailure(datesQ, filtersQ);
 
   return (
     <div className="space-y-5">
@@ -115,7 +117,7 @@ export default function SohAnalysis() {
       {(q.data?.warnings || []).map((warning) => (
         <p key={warning} role="status" className="rounded border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">{warning}</p>
       ))}
-      {q.isError && q.data && <p role="alert" className="text-sm text-red-500">Refresh failed; showing the last loaded SOH results.</p>}
+      {(q.isError && q.data) || sourceRefreshFailed ? <p role="alert" className="text-sm text-red-500">A refresh failed; showing the last loaded SOH results and filter options.</p> : null}
       {datesQ.isLoading || filtersQ.isLoading || q.isLoading ? (
         <Card><LoadingState label="Loading SOH analysis" rows={6} /></Card>
       ) : sourceError ? (
