@@ -47,9 +47,8 @@ class StoreMasterStatusTests(unittest.TestCase):
 
 
 class ActiveDoorsTests(unittest.TestCase):
-    """TOTAL ACTIVE DOORS: counted on ADONIS STORE CODE - a store with
-    MULTIPLE brands counts as ONE active door if ANY ONE brand is L2L /
-    Annualized / New, irrespective of how many brands exist."""
+    """Count SIS doors by active status and NON-SIS doors by directory type,
+    once per ADONIS STORE CODE."""
 
     def _rows(self):
         return [
@@ -59,7 +58,7 @@ class ActiveDoorsTests(unittest.TestCase):
             # A2: every brand Closed -> NOT active.
             {"adonis_store_code": "A2", "brand": "Levis Mens", "store_type": "SIS", "store_status": "Closed"},
             {"adonis_store_code": "A2", "brand": "Killer", "store_type": "SIS", "store_status": "Closed"},
-            # A3: non-SIS -> NOT active.
+            # A3: NON-SIS is counted from directory type even with derived NA status.
             {"adonis_store_code": "A3", "brand": "Killer", "store_type": "NON - SIS", "store_status": "NA"},
             # A4: active via New.
             {"adonis_store_code": "A4", "brand": "Levis Womens", "store_type": "SIS", "store_status": "New"},
@@ -68,11 +67,11 @@ class ActiveDoorsTests(unittest.TestCase):
         ]
 
     def test_active_doors_counted_once_per_store_code(self):
-        self.assertEqual(store_master._active_door_count(self._rows()), 3)
+        self.assertEqual(store_master._active_door_count(self._rows()), 4)
 
     def test_active_door_counts_use_store_type_and_exclude_closed_only_doors(self):
         sis, non_sis = store_master._active_doors_by_store_type(self._rows())
-        self.assertEqual((sis, non_sis), (2, 1))
+        self.assertEqual((sis, non_sis), (2, 2))
         self.assertEqual(sis + non_sis, store_master._active_door_count(self._rows()))
 
     def test_brand_summary_groups_by_brand_name_not_code(self):
@@ -83,8 +82,8 @@ class ActiveDoorsTests(unittest.TestCase):
         self.assertEqual(by_brand["Levis Mens"]["total_active_doors"], 1)
         self.assertEqual(by_brand["Levis Mens"]["l2l"], 1)
         self.assertEqual(by_brand["Levis Mens"]["non_sis"], 0)
-        # Killer: A1 Closed, A2 Closed, A3 NA -> 0 active, 1 non-SIS door.
-        self.assertEqual(by_brand["Killer"]["total_active_doors"], 0)
+        # Killer: A1/A2 Closed; A3 is directory-listed NON-SIS with derived NA.
+        self.assertEqual(by_brand["Killer"]["total_active_doors"], 1)
         self.assertEqual(by_brand["Killer"]["non_sis"], 1)
         # Levis Womens: A4 New.
         self.assertEqual(by_brand["Levis Womens"]["new"], 1)

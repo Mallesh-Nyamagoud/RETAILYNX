@@ -110,6 +110,9 @@ export default function SohAnalysis() {
         </div>
       </Card>
       {exportError && <p role="alert" className="text-sm text-red-500">{exportError}</p>}
+      {(q.data?.warnings || []).map((warning) => (
+        <p key={warning} role="status" className="rounded border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">{warning}</p>
+      ))}
       {datesQ.isLoading || filtersQ.isLoading || q.isLoading ? (
         <Card><LoadingState label="Loading SOH analysis" rows={6} /></Card>
       ) : sourceError ? (

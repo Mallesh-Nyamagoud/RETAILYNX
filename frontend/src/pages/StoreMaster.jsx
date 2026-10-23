@@ -107,9 +107,8 @@ export default function StoreMaster() {
         </Card>
       ) : (
         <>
-          {/* ONE KPI card: Total Active Doors - active SIS and Non-SIS doors, counted once by ADONIS STORE CODE;
-              a store with multiple brands counts ONCE if ANY ONE brand is
-              L2L / Annualized / New, irrespective of how many brands exist. */}
+          {/* Active SIS doors follow tertiary status. NON-SIS doors are counted
+              from Store Master type because their derived status is NA. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             <Card padded={false} className="relative overflow-hidden">
               <div className="absolute left-0 top-0 h-full w-2 bg-gradient-to-b from-accent to-accent-hover rounded-l-xl" />
@@ -134,6 +133,7 @@ export default function StoreMaster() {
                         {(kpis.non_sis_doors || 0).toLocaleString()}
                       </span>
                     </p>
+                    <p className="mt-1 text-[11px] text-text-muted">SIS uses sales status; NON-SIS uses Store Master type.</p>
                   </div>
                 </div>
               </div>

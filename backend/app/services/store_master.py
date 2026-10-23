@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 from functools import lru_cache
+import re
 from typing import Any
 
 from app.core.config import ADMIN_PASSWORD
@@ -90,38 +91,55 @@ def _distinct_doors(rows, status):
 
 
 def _active_door_count(rows):
-    """TOTAL ACTIVE DOORS: counted on ADONIS STORE CODE - a store counts as
-    ONE active door if ANY ONE of its brands is L2L / Annualized / New,
-    irrespective of how many brands exist."""
-    return len({
-        str(r.get("adonis_store_code"))
-        for r in rows
-        if r.get("adonis_store_code") is not None
-        and (r.get("store_status") or "NA") in ACTIVE_STATUSES
-    })
+    """Count active SIS doors plus doors explicitly classified as NON-SIS.
+
+    NON-SIS doors have no tertiary sales history, so their derived status is
+    NA rather than L2L/Annualized/New. Store type is the source of truth for
+    counting them in the physical-door total.
+    """
+    sis, non_sis = _active_doors_by_store_type(rows)
+    return sis + non_sis
+
+
+def _is_non_sis(row) -> bool:
+    store_type = re.sub(r"[^A-Z0-9]", "", (row.get("store_type") or "").upper())
+    return store_type == "NONSIS"
 
 
 def _active_doors_by_store_type(rows):
-    """Count active physical doors by Store Master store_type.
+    """Count active SIS doors and directory-listed NON-SIS doors once each.
 
-    A door is active only when at least one brand is L2L, Annualized, or New.
-    Closed-only doors are excluded. Each door is counted once by store type.
+    SIS requires an active tertiary-derived status. NON-SIS is counted from
+    Store Master type because the absence of tertiary data gives those doors
+    status NA by design. Closed-only SIS doors are excluded.
     """
     sis_doors = set()
     non_sis_doors = set()
     for row in rows:
         code = row.get("adonis_store_code")
-        if code is None or (row.get("store_status") or "NA").strip() not in ACTIVE_STATUSES:
+        if code is None:
             continue
         code = str(code)
-        store_type = (row.get("store_type") or "").strip().upper().replace(" ", "")
-        if store_type == "SIS":
+        status = (row.get("store_status") or "NA").strip()
+        if _is_non_sis(row):
+            if status != "Closed":
+                non_sis_doors.add(code)
+        elif status in ACTIVE_STATUSES:
             sis_doors.add(code)
-        elif store_type == "NON-SIS":
-            non_sis_doors.add(code)
-    # Keep the classes exclusive if malformed data gives a door both types.
+    # Keep classes exclusive if inconsistent rows give one code both types.
     non_sis_doors -= sis_doors
     return len(sis_doors), len(non_sis_doors)
+
+
+def _distinct_non_sis_doors(rows):
+    return len({
+        str(row.get("adonis_store_code"))
+        for row in rows
+        if row.get("adonis_store_code") is not None
+        and _is_non_sis(row)
+        and (row.get("store_status") or "NA").strip() != "Closed"
+    })
+
 
 def _brand_summary_rows(rows):
     """BRAND-wise store status summary, grouped by BRAND NAME (not brand_code):
@@ -137,7 +155,7 @@ def _brand_summary_rows(rows):
             "l2l": _distinct_doors(brows, "L2L"),
             "annualized": _distinct_doors(brows, "Annualized"),
             "new": _distinct_doors(brows, "New"),
-            "non_sis": _distinct_doors(brows, "NA"),
+            "non_sis": _distinct_non_sis_doors(brows),
         })
     out.sort(key=lambda r: (-r["total_active_doors"], r["brand"]))
     return out

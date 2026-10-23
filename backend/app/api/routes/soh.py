@@ -69,7 +69,8 @@ def export(
         "store": store, "brand": brand, "category": category,
         "style": style, "season": season,
     }.items() if v}
-    rows = soh_analysis.get_summary(opening, ending, threshold, selected)["rows"]
+    result = soh_analysis.get_summary(opening, ending, threshold, selected)
+    rows = result["rows"]
     columns = {
         "store": "Store", "brand": "Brand", "category": "Category",
         "style": "Style", "season": "Season", "opening_soh": "Opening SOH",
@@ -85,6 +86,7 @@ def export(
             "End month": ending,
             "ST% threshold": f"{threshold:.0%}",
             "Filters applied": selected,
+            "Data notes": result.get("warnings", []),
         },
         title="SOH Analysis",
     )

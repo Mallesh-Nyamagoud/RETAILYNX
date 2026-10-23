@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 import re
 
 import duckdb
@@ -11,6 +12,7 @@ from app.core.config import BACKEND_DIR
 from app.core.database import execute_df
 
 SOH_DB = BACKEND_DIR / "data" / "soh_data_src.duckdb"
+log = logging.getLogger(__name__)
 FILTER_FIELDS = {
     "store": "name",
     "brand": "brand",
@@ -80,32 +82,71 @@ def get_summary(
 
     # SOH.NAME maps to secondary_data.customer_name; SOH.CODE maps to
     # secondary_data.brand_code. Match directly; the store master is incomplete.
-    sales = execute_df("""
-        select customer_name as store, brand_code, product_code_code as style,
-               season,
-               sum(qty) filter(where cast(bill_date as date)>cast(? as date)) as sale,
-               sum(qty) as total_sale
-        from secondary_data.data
-        where cast(bill_date as date)<=cast(? as date)
-        group by all
-    """, [opening, ending])
+    warnings = []
+    sales_source_error = False
+    try:
+        sales = execute_df("""
+            select customer_name as store, brand_code, product_code_code as style,
+                   season,
+                   sum(qty) filter(where cast(bill_date as date)>cast(? as date)) as sale,
+                   sum(qty) as total_sale
+            from secondary_data.data
+            where cast(bill_date as date)<=cast(? as date)
+            group by all
+        """, [opening, ending])
+    except Exception:
+        # SOH stock remains useful when the secondary sales attachment is
+        # unavailable; return it with a visible warning instead of failing the
+        # whole page with HTTP 500. The exception is retained in server logs.
+        log.exception("Could not read secondary sales for SOH analysis")
+        sales = pd.DataFrame(columns=["store", "brand_code", "style", "season", "sale", "total_sale"])
+        sales_source_error = True
+
     if sales.empty:
         df["sale"] = 0
         df["total_sale"] = 0
+        if sales_source_error:
+            warnings.append("Secondary sales data could not be loaded; sales measures are shown as 0.")
+        else:
+            warnings.append("No secondary sales were found through the selected end month.")
     else:
         for frame in (df, sales):
             frame["_store"] = frame["store"].map(_norm)
             frame["_brand_code"] = frame["brand_code"].map(_norm)
             frame["_style"] = frame["style"].map(_norm)
             frame["_season"] = frame["season"].map(_norm)
-        sales = sales.groupby(
-            ["_store", "_brand_code", "_style", "_season"], as_index=False
-        )[["sale", "total_sale"]].sum()
-        df = df.merge(
-            sales, on=["_store", "_brand_code", "_style", "_season"], how="left"
-        )
+        match_keys = ["_store", "_brand_code", "_style", "_season"]
+        style_keys = ["_store", "_brand_code", "_style"]
+        sales = sales.groupby(match_keys, as_index=False)[["sale", "total_sale"]].sum()
+        sales["_sales_match"] = True
+        # The billing workbook has no season field. Where its season enrichment
+        # is blank, allow a store/brand/style fallback only if this SOH result
+        # has exactly one season for that style. This recovers legitimate rows
+        # without assigning sales ambiguously across multiple seasons.
+        null_season_sales = sales[sales["_season"] == ""].groupby(
+            style_keys, as_index=False
+        )[["sale", "total_sale"]].sum().rename(columns={
+            "sale": "_fallback_sale", "total_sale": "_fallback_total_sale",
+        })
+        null_season_sales["_fallback_match"] = True
+        df["_soh_season_count"] = df.groupby(style_keys)["_season"].transform("nunique")
+        df = df.merge(sales, on=match_keys, how="left")
+        df = df.merge(null_season_sales, on=style_keys, how="left")
+        fallback = df["_sales_match"].isna() & df["_fallback_match"].notna() & (df["_soh_season_count"] == 1)
+        df.loc[fallback, "sale"] = df.loc[fallback, "_fallback_sale"]
+        df.loc[fallback, "total_sale"] = df.loc[fallback, "_fallback_total_sale"]
+        df.loc[fallback, "_sales_match"] = True
+        matched_keys = int(df["_sales_match"].notna().sum())
+        total_keys = len(df)
         df[["sale", "total_sale"]] = df[["sale", "total_sale"]].fillna(0)
-        df = df.drop(columns=["_store", "_brand_code", "_style", "_season"])
+        df = df.drop(columns=match_keys + style_keys + [
+            "_sales_match", "_fallback_sale", "_fallback_total_sale",
+            "_fallback_match", "_soh_season_count",
+        ])
+        if matched_keys < total_keys:
+            warnings.append(
+                f"Sales matched {matched_keys:,} of {total_keys:,} SOH rows. Blank-season billing rows use a unique store/brand/style fallback; unmatched rows show 0 sales."
+            )
 
     df["transferred_between"] = df.ending_soh - df.opening_soh + df.sale
     available_stock = df.opening_soh + df.sale
@@ -116,4 +157,5 @@ def get_summary(
     return {
         "rows": df[df.st_pct <= threshold].fillna(0).to_dict("records"),
         "dates": get_dates(),
+        "warnings": warnings,
     }
