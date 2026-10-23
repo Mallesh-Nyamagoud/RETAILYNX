@@ -94,13 +94,12 @@ def export(
     rows = result["rows"]
     columns = {
         "store": "Store", "brand": "Brand", "category": "Category",
-        "style": "Style Code", "season": "Season", "opening_soh": "Opening SOH",
-        "ending_soh": "End SOH Month",
-        "end_soh_sizewise": "End SOH Sizewise",
-        "tertiary_net_sales": "Tertiary Net Sales",
+        "style": "Style Code", "season": "Season", "opening_soh": "Start SOH",
+        "ending_soh": "End SOH", "end_soh_sizewise": "End SOH Sizewise",
+        "tertiary_period_sales": "Period Tertiary Net Sales",
+        "tertiary_total_sales": "Total Tertiary Net Sales (All Dates)",
         "secondary_transfer_qty": "Secondary Transfer (+ Qty)",
         "secondary_return_qty": "Secondary Return (- Qty)",
-        "total_style_net_sales": "Total Style Net Sales",
         "st_pct": "ST%", "opening_soh_clearance": "Start SOH Clearance %",
     }
     df = pd.DataFrame(rows, columns=columns).rename(columns=columns)
@@ -109,7 +108,6 @@ def export(
         {
             "Opening month": opening,
             "End month": ending,
-            "ST% threshold": f"{threshold:.0%}",
             "Filters applied": selected,
             "Data notes": result.get("warnings", []),
         },

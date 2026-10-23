@@ -225,25 +225,29 @@ def get_summary(
     df[["opening_soh", "ending_soh"]] = df[["opening_soh", "ending_soh"]].fillna(0)
     if "end_soh_sizewise" not in df:
         df["end_soh_sizewise"] = ""
+    df = df[df.opening_soh > 0].copy()
+    if df.empty:
+        return {"rows": [], "dates": get_dates(), "warnings": []}
     warnings: list[str] = []
     df = _store_code_lookup(df, warnings)
 
-    # Tertiary is actual point-of-sale data; signed returns reduce net sales.
+    # Period net sales and all-history net sales use signed tertiary quantities.
     try:
         tertiary = execute_df("""
             select adonis_store_code as store_code, brand_code, "Style_Code" as style,
-                   "SEASON" as season, sum(qty) as tertiary_net_sales
+                   "SEASON" as season,
+                   sum(qty) filter(where cast(date as date)>cast(? as date) and cast(date as date)<=cast(? as date)) as tertiary_period_sales,
+                   sum(qty) as tertiary_total_sales
             from tertiary_data.data
-            where cast(date as date)>cast(? as date) and cast(date as date)<=cast(? as date)
             group by all
         """, [opening, ending])
     except Exception:
         log.exception("Could not read tertiary sales for SOH analysis")
-        tertiary = pd.DataFrame(columns=["store", "brand_code", "style", "season", "tertiary_net_sales"])
+        tertiary = pd.DataFrame(columns=["store", "brand_code", "style", "season", "tertiary_period_sales", "tertiary_total_sales"])
         warnings.append("Tertiary sales could not be loaded; sales measures are shown as 0.")
     if tertiary.empty and not any("Tertiary sales could not be loaded" in w for w in warnings):
-        warnings.append("No tertiary sales were found between the selected snapshots.")
-    df = _merge_measures(df, tertiary, ["tertiary_net_sales"], "tertiary sales", warnings)
+        warnings.append("No tertiary sales records were found.")
+    df = _merge_measures(df, tertiary, ["tertiary_period_sales", "tertiary_total_sales"], "tertiary sales", warnings)
 
     # Positive secondary quantity transfers stock to store; negative returns it to WH.
     try:
@@ -264,17 +268,11 @@ def get_summary(
         warnings.append("No secondary stock transfers were found between the selected snapshots.")
     df = _merge_measures(df, transfers, ["secondary_transfer_qty", "secondary_return_qty"], "secondary transfers", warnings)
 
-    style_keys = ["brand", "brand_code", "category", "style", "season"]
-    df["total_style_net_sales"] = df.groupby(style_keys)["tertiary_net_sales"].transform("sum")
-    df["available_stock"] = (df.opening_soh + df.secondary_transfer_qty + df.secondary_return_qty).clip(lower=0)
-    df["st_pct"] = (df.tertiary_net_sales / df.available_stock.replace(0, pd.NA)).clip(lower=0, upper=1).fillna(0)
-    opening_available = df.opening_soh.clip(lower=0)
-    opening_clearance_qty = df["tertiary_net_sales"].clip(lower=0).where(
-        df.tertiary_net_sales < opening_available, opening_available
-    )
-    df["opening_soh_clearance"] = (opening_clearance_qty / opening_available.replace(0, pd.NA)).fillna(0)
+    opening_stock = df.opening_soh.clip(lower=0)
+    df["st_pct"] = (df.tertiary_period_sales / opening_stock.replace(0, pd.NA)).fillna(0)
+    df["opening_soh_clearance"] = df["st_pct"]
     return {
-        "rows": df[df.st_pct <= threshold].drop(columns=["store_code"], errors="ignore").fillna(0).to_dict("records"),
+        "rows": df.drop(columns=["store_code"], errors="ignore").fillna(0).to_dict("records"),
         "dates": get_dates(),
         "warnings": warnings,
     }

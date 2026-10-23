@@ -15,13 +15,13 @@ const COLUMNS = [
   { key: "category", label: "Category", value: (r) => r.category },
   { key: "style", label: "Style Code", value: (r) => r.style },
   { key: "season", label: "Season", value: (r) => r.season },
-  { key: "opening_soh", label: "Opening SOH", value: (r) => r.opening_soh },
-  { key: "tertiary_net_sales", label: "Tertiary Net Sales", value: (r) => r.tertiary_net_sales },
+  { key: "opening_soh", label: "Start SOH", value: (r) => r.opening_soh },
+  { key: "ending_soh", label: "End SOH", value: (r) => r.ending_soh },
+  { key: "end_soh_sizewise", label: "End SOH Sizewise", value: (r) => r.end_soh_sizewise },
+  { key: "tertiary_period_sales", label: "Period Tertiary Net Sales", value: (r) => r.tertiary_period_sales },
+  { key: "tertiary_total_sales", label: "Total Tertiary Net Sales (All Dates)", value: (r) => r.tertiary_total_sales },
   { key: "secondary_transfer_qty", label: "Secondary Transfer (+ Qty)", value: (r) => r.secondary_transfer_qty },
   { key: "secondary_return_qty", label: "Secondary Return (- Qty)", value: (r) => r.secondary_return_qty },
-  { key: "total_style_net_sales", label: "Total Style Net Sales", value: (r) => r.total_style_net_sales },
-  { key: "ending_soh", label: "End SOH Month", value: (r) => r.ending_soh },
-  { key: "end_soh_sizewise", label: "End SOH Sizewise", value: (r) => r.end_soh_sizewise },
   { key: "st_pct", label: "ST%", value: (r) => `${(r.st_pct * 100).toFixed(1)}%` },
   { key: "opening_soh_clearance", label: "Start SOH Clearance %", value: (r) => `${(r.opening_soh_clearance * 100).toFixed(1)}%` },
 ];
@@ -176,8 +176,8 @@ export default function SohAnalysis() {
             </th>)}</tr><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2" key={key}>
               {key === "st_pct" || key === "opening_soh_clearance" ? (
                 <div className="flex min-w-36 gap-1">
-                  <input aria-label={`Minimum ${label}`} type="number" min="0" max="100" step="0.1" placeholder="Min %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.min ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], min: e.target.value } }))} />
-                  <input aria-label={`Maximum ${label}`} type="number" min="0" max="100" step="0.1" placeholder="Max %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.max ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], max: e.target.value } }))} />
+                  <input aria-label={`Minimum ${label}`} type="number" step="0.1" placeholder="Min %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.min ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], min: e.target.value } }))} />
+                  <input aria-label={`Maximum ${label}`} type="number" step="0.1" placeholder="Max %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.max ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], max: e.target.value } }))} />
                 </div>
               ) : (
                 <ColumnMultiFilter label={label} options={filterOptions[key] || []} selected={columnSelections[key] || []} onChange={(selected) => setColumnSelections((current) => ({ ...current, [key]: selected }))} />
@@ -188,7 +188,7 @@ export default function SohAnalysis() {
             </tr>)}</tbody>
           </table></div>
           {visibleRows.length === 0 && <p className="py-8 text-center text-sm text-text-muted">No rows match these column filters. Clear a filter to see results.</p>}
-          <p className="mt-3 text-xs text-text-muted">Tertiary net sales include signed returns. Secondary transfer and return quantities are separate; returns retain their negative sign. Start SOH clearance assumes opening stock sells first and is capped at 100%.</p>
+          <p className="mt-3 text-xs text-text-muted">Tertiary net sales include signed returns. Secondary transfer and return quantities are separate; returns retain their negative sign. ST% and Start SOH Clearance are each calculated as period tertiary net sales divided by Start SOH.</p>
         </Card>}
     </div>
   );
