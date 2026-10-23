@@ -2,9 +2,9 @@ import { Download } from "lucide-react";
 import Button from "./Button";
 import clsx from "clsx";
 
-export function ExportButton({ onExport, label = "Export to Excel", loading }) {
+export function ExportButton({ onExport, label = "Export to Excel", loading, disabled = false }) {
   return (
-    <Button variant="primary" size="md" icon={Download} onClick={onExport} loading={loading}>
+    <Button variant="primary" size="md" icon={Download} onClick={onExport} loading={loading} disabled={disabled}>
       {label}
     </Button>
   );

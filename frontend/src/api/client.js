@@ -148,6 +148,20 @@ export const billKpiApi = {
 };
 
 // ---------------------------------------------------------------------------
+// SOH Analysis
+// ---------------------------------------------------------------------------
+export const sohApi = {
+  dates: () => http.get("/soh/dates").then((r) => r.data),
+  filters: () => http.get("/soh/filters").then((r) => r.data),
+  summary: (params) => http.get("/soh/summary", { params }).then((r) => r.data),
+  export: (params) =>
+    downloadBlob(
+      http.get("/soh/export", { params, responseType: "blob" }),
+      "soh_analysis.xlsx"
+    ),
+};
+
+// ---------------------------------------------------------------------------
 // Store Master
 // ---------------------------------------------------------------------------
 export const storeMasterApi = {
