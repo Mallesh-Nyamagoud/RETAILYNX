@@ -249,22 +249,24 @@ def get_summary(
     try:
         transfers = execute_df("""
             select adonis_store_code as store_code, brand_code, product_code_code as style,
-                   season, sum(qty) as secondary_movement
+                   season,
+                   sum(case when qty > 0 then qty else 0 end) as secondary_transfer_qty,
+                   sum(case when qty < 0 then qty else 0 end) as secondary_return_qty
             from secondary_data.data
             where cast(bill_date as date)>cast(? as date) and cast(bill_date as date)<=cast(? as date)
             group by all
         """, [opening, ending])
     except Exception:
         log.exception("Could not read secondary stock transfers for SOH analysis")
-        transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "secondary_movement"])
+        transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "secondary_transfer_qty", "secondary_return_qty"])
         warnings.append("Secondary transfer data could not be loaded; transfer measures are shown as 0.")
     if transfers.empty and not any("Secondary transfer data could not be loaded" in w for w in warnings):
         warnings.append("No secondary stock transfers were found between the selected snapshots.")
-    df = _merge_measures(df, transfers, ["secondary_movement"], "secondary transfers", warnings)
+    df = _merge_measures(df, transfers, ["secondary_transfer_qty", "secondary_return_qty"], "secondary transfers", warnings)
 
     style_keys = ["brand", "brand_code", "category", "style", "season"]
     df["total_style_net_sales"] = df.groupby(style_keys)["tertiary_net_sales"].transform("sum")
-    df["available_stock"] = (df.opening_soh + df.secondary_movement).clip(lower=0)
+    df["available_stock"] = (df.opening_soh + df.secondary_transfer_qty + df.secondary_return_qty).clip(lower=0)
     df["st_pct"] = (df.tertiary_net_sales / df.available_stock.replace(0, pd.NA)).clip(lower=0, upper=1).fillna(0)
     opening_available = df.opening_soh.clip(lower=0)
     opening_clearance_qty = df["tertiary_net_sales"].clip(lower=0).where(

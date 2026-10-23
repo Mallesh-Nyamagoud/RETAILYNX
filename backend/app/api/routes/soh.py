@@ -98,7 +98,8 @@ def export(
         "ending_soh": "End SOH Month",
         "end_soh_sizewise": "End SOH Sizewise",
         "tertiary_net_sales": "Tertiary Net Sales",
-        "secondary_movement": "Secondary Transfer / Return Qty",
+        "secondary_transfer_qty": "Secondary Transfer (+ Qty)",
+        "secondary_return_qty": "Secondary Return (- Qty)",
         "total_style_net_sales": "Total Style Net Sales",
         "st_pct": "ST%", "opening_soh_clearance": "Start SOH Clearance %",
     }

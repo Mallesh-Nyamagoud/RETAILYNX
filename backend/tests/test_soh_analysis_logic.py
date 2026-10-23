@@ -56,9 +56,9 @@ class SohAnalysisLogicTests(unittest.TestCase):
             ["STORE B", "STORE-B", "B1", "STYLE-1", "SEASON-1", 4],
         ], columns=["store", "store_code", "brand_code", "style", "season", "tertiary_net_sales"])
         transfers = pd.DataFrame([
-            ["STORE A", "STORE-A", "B1", "STYLE-1", "OLD-SEASON", -2],
-            ["STORE B", "STORE-B", "B1", "STYLE-1", "SEASON-1", 2],
-        ], columns=["store", "store_code", "brand_code", "style", "season", "secondary_movement"])
+            ["STORE A", "STORE-A", "B1", "STYLE-1", "OLD-SEASON", 3, -1],
+            ["STORE B", "STORE-B", "B1", "STYLE-1", "SEASON-1", 0, 0],
+        ], columns=["store", "store_code", "brand_code", "style", "season", "secondary_transfer_qty", "secondary_return_qty"])
         mapping = pd.DataFrame([
             ["STORE A", "B1", "STORE-A"], ["STORE B", "B1", "STORE-B"],
         ], columns=["master_store", "brand_code", "store_code"])
@@ -68,7 +68,8 @@ class SohAnalysisLogicTests(unittest.TestCase):
         self.assertIn("tertiary_data.data", execute.call_args_list[1].args[0])
         self.assertIn("sum(qty)", execute.call_args_list[1].args[0])
         self.assertNotIn("return_qty", execute.call_args_list[1].args[0])
-        self.assertIn("sum(qty)", execute.call_args_list[2].args[0])
+        self.assertIn("qty > 0", execute.call_args_list[2].args[0])
+        self.assertIn("qty < 0", execute.call_args_list[2].args[0])
         self.assertIn("secondary_data.data", execute.call_args_list[2].args[0])
 
         self.assertEqual(len(result["rows"]), 2)
@@ -79,18 +80,18 @@ class SohAnalysisLogicTests(unittest.TestCase):
         self.assertEqual(store_a["total_style_net_sales"], 6)
         self.assertEqual(store_a["ending_soh"], 3)
         self.assertEqual(store_a["end_soh_sizewise"], "M-1, S-2")
-        self.assertEqual(store_a["secondary_movement"], -2)
-        self.assertAlmostEqual(store_a["st_pct"], 2 / 6)
+        self.assertEqual((store_a["secondary_transfer_qty"], store_a["secondary_return_qty"]), (3, -1))
+        self.assertAlmostEqual(store_a["st_pct"], 0.2)
         self.assertAlmostEqual(store_a["opening_soh_clearance"], 0.25)
         self.assertEqual(store_b["total_style_net_sales"], 6)
-        self.assertAlmostEqual(store_b["st_pct"], 4 / 6)
+        self.assertAlmostEqual(store_b["st_pct"], 1.0)
 
     def test_same_snapshot_period_has_zero_intervening_sales(self):
         mapping = pd.DataFrame([
             ["STORE A", "B1", "STORE-A"], ["STORE B", "B1", "STORE-B"],
         ], columns=["master_store", "brand_code", "store_code"])
         empty_sales = pd.DataFrame(columns=["store", "brand_code", "style", "season", "tertiary_net_sales"])
-        empty_transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "secondary_movement"])
+        empty_transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "secondary_transfer_qty", "secondary_return_qty"])
         with patch.object(soh_analysis, "execute_df", side_effect=[mapping, empty_sales, empty_transfers]):
             result = soh_analysis.get_summary("2026-07-01", "2026-07-01")
         row = next(row for row in result["rows"] if row["store"] == "STORE A")
@@ -101,13 +102,13 @@ class SohAnalysisLogicTests(unittest.TestCase):
         mapping = pd.DataFrame([
             ["STORE A", "B1", "STORE-A"], ["STORE B", "B1", "STORE-B"],
         ], columns=["master_store", "brand_code", "store_code"])
-        empty_transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "secondary_movement"])
+        empty_transfers = pd.DataFrame(columns=["store", "brand_code", "style", "season", "secondary_transfer_qty", "secondary_return_qty"])
         with patch.object(soh_analysis, "execute_df", side_effect=[mapping, RuntimeError("source unavailable"), empty_transfers]):
             result = soh_analysis.get_summary("2026-07-01", "2026-09-01")
         self.assertTrue(result["rows"])
         self.assertEqual(result["rows"][0]["tertiary_net_sales"], 0)
         self.assertTrue(any("could not be loaded" in warning for warning in result["warnings"]))
-        self.assertEqual(result["rows"][0]["secondary_movement"], 0)
+        self.assertEqual(result["rows"][0]["secondary_transfer_qty"], 0)
 
 
 if __name__ == "__main__":

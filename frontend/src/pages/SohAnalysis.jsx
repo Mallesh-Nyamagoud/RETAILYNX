@@ -1,4 +1,4 @@
-﻿import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { sohApi } from "../api/client";
@@ -16,7 +16,8 @@ const COLUMNS = [
   { key: "season", label: "Season", value: (r) => r.season },
   { key: "opening_soh", label: "Opening SOH", value: (r) => r.opening_soh },
   { key: "tertiary_net_sales", label: "Tertiary Net Sales", value: (r) => r.tertiary_net_sales },
-  { key: "secondary_movement", label: "Secondary Transfer / Return Qty", value: (r) => r.secondary_movement },
+  { key: "secondary_transfer_qty", label: "Secondary Transfer (+ Qty)", value: (r) => r.secondary_transfer_qty },
+  { key: "secondary_return_qty", label: "Secondary Return (- Qty)", value: (r) => r.secondary_return_qty },
   { key: "total_style_net_sales", label: "Total Style Net Sales", value: (r) => r.total_style_net_sales },
   { key: "ending_soh", label: "End SOH Month", value: (r) => r.ending_soh },
   { key: "end_soh_sizewise", label: "End SOH Sizewise", value: (r) => r.end_soh_sizewise },
@@ -74,7 +75,7 @@ export default function SohAnalysis() {
   return (
     <div className="space-y-5">
       <PageHeader title="SOH Analysis"
-        description="Compare opening stock, tertiary net sales, secondary transfers and returns, closing stock by size, and sell-through."
+        description="Compare opening stock, tertiary net sales, signed secondary transfers and returns, closing stock by size, and sell-through."
         actions={<ExportButton onExport={handleExport} loading={exporting} disabled={!visibleRows.length || q.isLoading} />} />
       <Card><div className="grid gap-4 sm:grid-cols-2">
         <label className="text-sm">Opening month<select className="mt-1 w-full rounded border border-border bg-base p-2" value={start}
@@ -108,7 +109,7 @@ export default function SohAnalysis() {
             </tr>)}</tbody>
           </table></div>
           {visibleRows.length === 0 && <p className="py-8 text-center text-sm text-text-muted">No rows match these column filters. Clear a filter to see results.</p>}
-          <p className="mt-3 text-xs text-text-muted">Tertiary net sales include signed returns. Secondary quantity is signed: positive means transfer from WH to store; negative means return to WH. Start SOH clearance assumes opening stock sells first and is capped at 100%.</p>
+          <p className="mt-3 text-xs text-text-muted">Tertiary net sales include signed returns. Secondary transfer and return quantities are separate; returns retain their negative sign. Start SOH clearance assumes opening stock sells first and is capped at 100%.</p>
         </Card>}
     </div>
   );
