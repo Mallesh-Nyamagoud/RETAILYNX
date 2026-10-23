@@ -94,10 +94,11 @@ def export(
     rows = result["rows"]
     columns = {
         "store": "Store", "brand": "Brand", "category": "Category",
-        "style": "Style", "season": "Season", "opening_soh": "Opening SOH",
-        "transferred_between": "Transferred Between", "ending_soh": "End SOH Month",
-        "end_soh_sizewise": "End SOH Sizewise", "total_sale": "Total Sale",
-        "sale": "Sale", "st_pct": "ST%", "opening_soh_clearance": "Opening SOH Clearance",
+        "style": "Style Code", "season": "Season", "opening_soh": "Opening SOH",
+        "net_stock_movement": "Net Stock Movement (unconfirmed)", "ending_soh": "End SOH Month",
+        "end_soh_sizewise": "End SOH Sizewise", "sale": "Gross Sold",
+        "return_qty": "Returns", "net_sold": "Net Sold", "total_style_sold": "Total Style Sold",
+        "st_pct": "ST%", "opening_soh_clearance": "Opening SOH Clearance",
     }
     df = pd.DataFrame(rows, columns=columns).rename(columns=columns)
     buffer = build_workbook(

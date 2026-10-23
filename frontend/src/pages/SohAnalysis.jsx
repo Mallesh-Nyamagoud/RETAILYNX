@@ -19,16 +19,18 @@ const COLUMNS = [
   ["Store", (row) => row.store],
   ["Brand", (row) => row.brand],
   ["Category", (row) => row.category],
-  ["Style", (row) => row.style],
+  ["Style Code", (row) => row.style],
   ["Season", (row) => row.season],
   ["Opening SOH", (row) => row.opening_soh],
-  ["Transferred Between", (row) => row.transferred_between],
+  ["Gross Sold", (row) => row.sale],
+  ["Returns", (row) => row.return_qty],
+  ["Net Sold", (row) => row.net_sold],
+  ["Total Style Sold", (row) => row.total_style_sold],
   ["End SOH Month", (row) => row.ending_soh],
   ["End SOH Sizewise", (row) => row.end_soh_sizewise],
-  ["Total Sale", (row) => row.total_sale],
-  ["Sale", (row) => row.sale],
   ["ST%", (row) => `${(row.st_pct * 100).toFixed(1)}%`],
   ["Opening SOH Clearance", (row) => `${(row.opening_soh_clearance * 100).toFixed(1)}%`],
+  ["Net Stock Movement*", (row) => row.net_stock_movement],
 ];
 
 export default function SohAnalysis() {
@@ -77,7 +79,7 @@ export default function SohAnalysis() {
     <div className="space-y-5">
       <PageHeader
         title="SOH Analysis"
-        description="Compare monthly store stock, sales, and sell-through by brand, category, style, and season."
+        description="Compare opening stock, sales between snapshots, closing stock by size, and sell-through by category, style code, and season."
         actions={<ExportButton onExport={handleExport} loading={exporting} disabled={!rows.length || q.isLoading} />}
       />
       <Card>
@@ -132,7 +134,7 @@ export default function SohAnalysis() {
               {COLUMNS.map(([label, value]) => <td className="p-2 whitespace-nowrap" key={label}>{value(row) ?? "?"}</td>)}
             </tr>)}</tbody>
           </table></div>
-          <p className="mt-3 text-xs text-text-muted">Transferred Between is calculated from stock movement and sales. No separate transfer ledger was supplied.</p>
+          <p className="mt-3 text-xs text-text-muted">* Net stock movement is the balance change after net sales. The available files contain Sales and Return records but no stock-transfer ledger, so transfers cannot be confirmed from this report.</p>
         </Card>
       )}
     </div>

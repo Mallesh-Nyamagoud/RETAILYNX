@@ -59,7 +59,7 @@ def get_summary(
     if not SOH_DB.exists():
         return {"rows": [], "dates": [], "message": "SOH source is missing."}
     where = ["cast(date as date) in(cast(? as date),cast(? as date))"]
-    params: list = [opening, ending, ending, opening, ending]
+    params: list = [opening, ending, opening, ending]
     for key, column in FILTER_FIELDS.items():
         value = (filters or {}).get(key)
         if value:
@@ -71,11 +71,29 @@ def get_summary(
                    pc9 as style, season,
                    sum(qty) filter(where cast(date as date)=cast(? as date)) opening_soh,
                    sum(qty) filter(where cast(date as date)=cast(? as date)) ending_soh,
-                   string_agg(cast(correct_size as varchar)||'-'||cast(qty as varchar), ', ')
-                     filter(where cast(date as date)=cast(? as date)) end_soh_sizewise,
                    max(mrp) mrp
             from data where {' and '.join(where)} group by all
         """, params).df()
+        size_where = ["cast(date as date)=cast(? as date)"]
+        size_params = [ending]
+        for key, column in FILTER_FIELDS.items():
+            value = (filters or {}).get(key)
+            if value:
+                size_where.append(f"trim(cast({column} as varchar)) = ?")
+                size_params.append(value)
+        size_df = con.execute(f"""
+            select store, brand, brand_code, category, style, season,
+                   string_agg(cast(correct_size as varchar)||'-'||cast(size_qty as varchar), ', ' order by correct_size) end_soh_sizewise
+            from (
+                select name as store, brand, code as brand_code, gc as category,
+                       pc9 as style, season, correct_size, sum(qty) as size_qty
+                from data where {' and '.join(size_where)}
+                group by all
+            ) by_size
+            group by all
+        """, size_params).df()
+        if not size_df.empty:
+            df = df.merge(size_df, on=["store", "brand", "brand_code", "category", "style", "season"], how="left")
     if df.empty:
         return {"rows": [], "dates": get_dates()}
     df[["opening_soh", "ending_soh"]] = df[["opening_soh", "ending_soh"]].fillna(0)
@@ -88,23 +106,23 @@ def get_summary(
         sales = execute_df("""
             select customer_name as store, brand_code, product_code_code as style,
                    season,
-                   sum(qty) filter(where cast(bill_date as date)>cast(? as date)) as sale,
-                   sum(qty) as total_sale
+                   sum(qty) filter(where upper(tran_type)='SALES' and cast(bill_date as date)>cast(? as date)) as sale,
+                   sum(qty) filter(where upper(tran_type)='RETURN' and cast(bill_date as date)>cast(? as date)) as return_qty
             from secondary_data.data
             where cast(bill_date as date)<=cast(? as date)
             group by all
-        """, [opening, ending])
+        """, [opening, opening, ending])
     except Exception:
         # SOH stock remains useful when the secondary sales attachment is
         # unavailable; return it with a visible warning instead of failing the
         # whole page with HTTP 500. The exception is retained in server logs.
         log.exception("Could not read secondary sales for SOH analysis")
-        sales = pd.DataFrame(columns=["store", "brand_code", "style", "season", "sale", "total_sale"])
+        sales = pd.DataFrame(columns=["store", "brand_code", "style", "season", "sale", "return_qty"])
         sales_source_error = True
 
     if sales.empty:
         df["sale"] = 0
-        df["total_sale"] = 0
+        df["return_qty"] = 0
         if sales_source_error:
             warnings.append("Secondary sales data could not be loaded; sales measures are shown as 0.")
         else:
@@ -117,7 +135,7 @@ def get_summary(
             frame["_season"] = frame["season"].map(_norm)
         match_keys = ["_store", "_brand_code", "_style", "_season"]
         style_keys = ["_store", "_brand_code", "_style"]
-        sales = sales.groupby(match_keys, as_index=False)[["sale", "total_sale"]].sum()
+        sales = sales.groupby(match_keys, as_index=False)[["sale", "return_qty"]].sum()
         sales["_sales_match"] = True
         # The billing workbook has no season field. Where its season enrichment
         # is blank, allow a store/brand/style fallback only if this SOH result
@@ -125,8 +143,8 @@ def get_summary(
         # without assigning sales ambiguously across multiple seasons.
         null_season_sales = sales[sales["_season"] == ""].groupby(
             style_keys, as_index=False
-        )[["sale", "total_sale"]].sum().rename(columns={
-            "sale": "_fallback_sale", "total_sale": "_fallback_total_sale",
+        )[["sale", "return_qty"]].sum().rename(columns={
+            "sale": "_fallback_sale", "return_qty": "_fallback_return_qty",
         })
         null_season_sales["_fallback_match"] = True
         df["_soh_season_count"] = df.groupby(style_keys)["_season"].transform("nunique")
@@ -134,13 +152,13 @@ def get_summary(
         df = df.merge(null_season_sales, on=style_keys, how="left")
         fallback = df["_sales_match"].isna() & df["_fallback_match"].notna() & (df["_soh_season_count"] == 1)
         df.loc[fallback, "sale"] = df.loc[fallback, "_fallback_sale"]
-        df.loc[fallback, "total_sale"] = df.loc[fallback, "_fallback_total_sale"]
+        df.loc[fallback, "return_qty"] = df.loc[fallback, "_fallback_return_qty"]
         df.loc[fallback, "_sales_match"] = True
         matched_keys = int(df["_sales_match"].notna().sum())
         total_keys = len(df)
-        df[["sale", "total_sale"]] = df[["sale", "total_sale"]].fillna(0)
+        df[["sale", "return_qty"]] = df[["sale", "return_qty"]].fillna(0)
         df = df.drop(columns=match_keys + style_keys + [
-            "_sales_match", "_fallback_sale", "_fallback_total_sale",
+            "_sales_match", "_fallback_sale", "_fallback_return_qty",
             "_fallback_match", "_soh_season_count",
         ])
         if matched_keys < total_keys:
@@ -148,11 +166,16 @@ def get_summary(
                 f"Sales matched {matched_keys:,} of {total_keys:,} SOH rows. Blank-season billing rows use a unique store/brand/style fallback; unmatched rows show 0 sales."
             )
 
-    df["transferred_between"] = df.ending_soh - df.opening_soh + df.sale
-    available_stock = df.opening_soh + df.sale
-    df["st_pct"] = (df.sale / available_stock.replace(0, pd.NA)).fillna(0)
+    df["net_sold"] = df.sale - df.return_qty
+    style_keys = ["brand", "brand_code", "category", "style", "season"]
+    df["total_style_sold"] = df.groupby(style_keys)["net_sold"].transform("sum")
+    # No transfer ledger is supplied: this is net stock movement left
+    # unexplained after billing, not a confirmed transfer quantity.
+    df["net_stock_movement"] = df.ending_soh - df.opening_soh + df.net_sold
+    sell_through_base = df.net_sold + df.ending_soh
+    df["st_pct"] = (df.net_sold / sell_through_base.where(sell_through_base > 0)).fillna(0)
     df["opening_soh_clearance"] = (
-        df.sale / df.opening_soh.replace(0, pd.NA)
+        df.net_sold / df.opening_soh.replace(0, pd.NA)
     ).fillna(0)
     return {
         "rows": df[df.st_pct <= threshold].fillna(0).to_dict("records"),
