@@ -39,6 +39,57 @@ def _filters_for_request(filters: dict[str, list[str]] | None) -> dict[str, list
     return selected
 
 
+def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd.DataFrame:
+    """Map SOH stock to tertiary categories by store, brand, style, and season.
+
+    Some current stock styles have no tertiary history. Retain those quantities
+    under an explicit SOH category label instead of silently dropping them.
+    """
+    stock = stock.copy()
+    category_map = category_map.copy()
+    fields = (("store_code", "_store_key"), ("brand_code", "_brand_key"),
+              ("style", "_style_key"), ("season", "_season_key"))
+    for frame in (stock, category_map):
+        for source, normalized in fields:
+            frame[normalized] = frame[source].map(_norm)
+    category_map["category"] = category_map["category"].astype(str).str.strip()
+    category_map = category_map[category_map["category"] != ""]
+    stock["_mapped_category"] = None
+
+    match_grains = (
+        ("_store_key", "_brand_key", "_style_key", "_season_key"),
+        ("_store_key", "_brand_key", "_style_key"),
+        ("_brand_key", "_style_key", "_season_key"),
+        ("_brand_key", "_style_key"),
+    )
+    for keys in match_grains:
+        candidates = category_map.groupby(list(keys), dropna=False)["category"].agg(
+            lambda values: values.dropna().astype(str).unique().tolist()
+        ).reset_index()
+        candidates = candidates[candidates["category"].map(len) == 1]
+        lookup = {
+            tuple(row[key] for key in keys): row["category"][0]
+            for row in candidates.to_dict("records")
+        }
+        unresolved = stock["_mapped_category"].isna()
+        indexes = stock.index[unresolved]
+        mapped = [
+            lookup.get(tuple(values))
+            for values in stock.loc[indexes, list(keys)].itertuples(index=False, name=None)
+        ]
+        stock.loc[indexes, "_mapped_category"] = mapped
+
+    unmapped = stock["_mapped_category"].isna()
+    unmapped_qty = float(stock.loc[unmapped, "current_stock"].sum())
+    if unmapped_qty:
+        stock.loc[unmapped, "_mapped_category"] = stock.loc[unmapped, "soh_category"].map(
+            lambda value: "Unmapped SOH - " + (str(value).strip() if pd.notna(value) and str(value).strip() else "Unclassified")
+        )
+    stock["category"] = stock["_mapped_category"]
+    stock["_category_key"] = stock["category"].astype(str).str.strip().str.upper()
+    return stock
+
+
 def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | None) -> dict:
     hierarchy = list(hierarchy or [])
     valid_dimensions = {item["column"] for item in get_dimensions()}
@@ -86,11 +137,10 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
         with duckdb.connect(str(SOH_DB), read_only=True) as con:
             stock_as_of = con.execute("SELECT MAX(CAST(date AS DATE)) FROM data").fetchone()[0]
             stock = con.execute("""
-                SELECT name AS store, code AS brand_code, gc AS category,
-                       SUM(qty) AS current_stock
+                SELECT name AS store, code AS brand_code, pc9 AS style, season,
+                       gc AS soh_category, SUM(qty) AS current_stock
                 FROM data
                 WHERE CAST(date AS DATE) = (SELECT MAX(CAST(date AS DATE)) FROM data)
-                  AND gc IS NOT NULL
                 GROUP BY ALL
             """).df()
         if stock.empty:
@@ -99,6 +149,19 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
             combined = sales_rows
         else:
             stock = soh_analysis._store_code_lookup(stock, warnings)
+            category_map = execute_df("""
+                SELECT adonis_store_code AS store_code, brand_code,
+                       "Style_Code" AS style, "SEASON" AS season, category
+                FROM tertiary_data.data
+                WHERE category IS NOT NULL
+                GROUP BY ALL
+            """)
+            stock = _map_stock_categories(stock, category_map)
+            mapped_qty = float(stock.loc[~stock["category"].str.startswith("Unmapped SOH -"), "current_stock"].sum())
+            total_stock = float(stock["current_stock"].sum())
+            unmapped_qty = total_stock - mapped_qty
+            if unmapped_qty:
+                warnings.append(f"{unmapped_qty:,.0f} units from the latest SOH snapshot had no tertiary style match; they are listed by SOH category.")
             master_dimensions = list(dict.fromkeys([*row_dimensions, *FILTER_COLUMNS]))
             master_select = ", ".join(quote_ident(column) for column in master_dimensions)
             master = execute_df(f"""
@@ -117,10 +180,14 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
             for column, values in selected_filters.items():
                 if values:
                     stock = stock[stock[column].astype(str).isin(values)]
-            stock["_category_key"] = stock["category"].astype(str).str.strip().str.upper()
             group_keys = ["_category_key", *row_dimensions]
-            stock_rows = stock.groupby(group_keys, dropna=False, as_index=False)["current_stock"].sum()
-            combined = sales_rows.merge(stock_rows, on=group_keys, how="left")
+            stock_rows = stock.groupby(group_keys, dropna=False, as_index=False).agg(
+                current_stock=("current_stock", "sum"),
+                category_stock=("category", "first"),
+            )
+            combined = sales_rows.merge(stock_rows, on=group_keys, how="outer")
+            combined["category"] = combined["category"].fillna(combined["category_stock"])
+            combined = combined.drop(columns=["category_stock"])
             combined["current_stock"] = combined["current_stock"].fillna(0)
 
     combined["total_sales"] = pd.to_numeric(combined["total_sales"], errors="coerce").fillna(0)

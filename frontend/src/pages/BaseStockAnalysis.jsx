@@ -1,13 +1,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarRange, Layers3 } from "lucide-react";
+import { CalendarRange, ChevronDown, ChevronUp, Layers3 } from "lucide-react";
 import { baseStockApi } from "../api/client";
 import Card from "../components/common/Card";
 import DimensionPicker from "../components/common/DimensionPicker";
 import { EmptyState, ErrorState, LoadingState } from "../components/common/LoadingState";
 import FilterPanel from "../components/common/FilterPanel";
 import PageHeader from "../components/layout/PageHeader";
-import { fmtDate } from "../utils/format";
 
 const NUMBER = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
 const PERCENT = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
@@ -23,6 +22,12 @@ const MEASURES = [
   { key: "requirement", label: "Stock - F4M Requirement" },
 ];
 
+function formatDateDdMmYyyy(value) {
+  if (!value) return "-";
+  const [year, month, day] = String(value).slice(0, 10).split("-");
+  return [day, month, year].join("/");
+}
+
 function showNumber(value) {
   return NUMBER.format(Number(value) || 0);
 }
@@ -32,8 +37,9 @@ function showPercent(value) {
 }
 
 export default function BaseStockAnalysis() {
-  const [dimensions, setDimensions] = useState([]);
+  const [dimensions, setDimensions] = useState(["category"]);
   const [filters, setFilters] = useState({});
+  const [sort, setSort] = useState({ key: "total_sales_contribution_pct", direction: "desc" });
   const dimensionsQ = useQuery({
     queryKey: ["base-stock", "dimensions"],
     queryFn: baseStockApi.dimensions,
@@ -59,16 +65,26 @@ export default function BaseStockAnalysis() {
   }), [pickerDimensions]);
   const rows = useMemo(() => {
     const result = [...(analysisQ.data?.rows || [])];
-    const keys = ["category", ...dimensions];
     return result.sort((a, b) => {
-      for (const key of keys) {
+      const contributionOrder = (Number(b[sort.key]) || 0) - (Number(a[sort.key]) || 0);
+      if (contributionOrder) return sort.direction === "desc" ? contributionOrder : -contributionOrder;
+      for (const key of dimensions) {
         const order = String(a[key] ?? "").localeCompare(String(b[key] ?? ""), undefined, { numeric: true, sensitivity: "base" });
         if (order) return order;
       }
       return 0;
     });
-  }, [analysisQ.data, dimensions]);
-  const rowLabels = ["category", ...dimensions].map((column) => labels[column] || column);
+  }, [analysisQ.data, dimensions, sort]);
+  const rowLabels = dimensions.map((column) => labels[column] || column);
+  const toggleContributionSort = (key) => setSort((current) => ({
+    key,
+    direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
+  }));
+  const sortLabel = {
+    total_sales_contribution_pct: "Total Sales Cont.%",
+    last_6m_contribution_pct: "Last 6M Sales Cont.%",
+    current_stock_contribution_pct: "Current Stock Cont.%",
+  }[sort.key];
 
   return (
     <div className="space-y-5">
@@ -84,8 +100,8 @@ export default function BaseStockAnalysis() {
             <div>
               <DimensionPicker
                 dimensions={pickerDimensions}
-                value={["category", ...dimensions]}
-                onChange={(next) => setDimensions(next.filter((column) => column !== "category"))}
+                value={dimensions}
+                onChange={(next) => setDimensions(next.includes("category") ? next : [...next, "category"])}
               />
               <p className="mt-2 flex items-center gap-1.5 text-xs text-text-muted">
                 <Layers3 size={13} /> Category stays in the row hierarchy; additional dimensions can be added and reordered.
@@ -105,9 +121,9 @@ export default function BaseStockAnalysis() {
 
       {analysisQ.data && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-text-secondary">
-          <span className="flex items-center gap-1.5"><CalendarRange size={14} className="text-accent" />Tertiary data through <strong className="text-text-primary">{fmtDate(analysisQ.data.tertiary_as_of)}</strong></span>
-          {analysisQ.data.last_6m_start && <span>Last 6M starts <strong className="text-text-primary">{fmtDate(analysisQ.data.last_6m_start)}</strong></span>}
-          {analysisQ.data.stock_as_of && <span>Stock snapshot <strong className="text-text-primary">{fmtDate(analysisQ.data.stock_as_of)}</strong></span>}
+          <span className="flex items-center gap-1.5"><CalendarRange size={14} className="text-accent" />Tertiary as of <strong className="text-text-primary">{formatDateDdMmYyyy(analysisQ.data.tertiary_as_of)}</strong></span>
+          {analysisQ.data.last_6m_start && <span>Last 6M starts <strong className="text-text-primary">{formatDateDdMmYyyy(analysisQ.data.last_6m_start)}</strong></span>}
+          {analysisQ.data.stock_as_of && <span>SOH as of <strong className="text-text-primary">{formatDateDdMmYyyy(analysisQ.data.stock_as_of)}</strong></span>}
         </div>
       )}
 
@@ -126,7 +142,7 @@ export default function BaseStockAnalysis() {
           <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-text-primary">Category Stock Position</h2>
-              <p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString()} rows | contribution is calculated across the filtered result.</p>
+              <p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString()} rows | sorted by {sortLabel} ({sort.direction === "desc" ? "highest first" : "lowest first"})</p>
             </div>
             <p className="text-xs text-text-muted">F4M = (Last 6M Sales / 6) * 4</p>
           </div>
@@ -146,14 +162,20 @@ export default function BaseStockAnalysis() {
                 </tr>
                 <tr>
                   {MEASURES.slice(0, 6).map((measure, index) => (
-                    <th key={measure.key + index} className="border-b border-r border-border px-3 py-2 text-right text-xs font-medium text-text-muted">{index % 2 === 0 ? "Qty" : "Cont.%"}</th>
+                    <th key={measure.key + index} className="border-b border-r border-border px-3 py-2 text-right text-xs font-medium text-text-muted">
+                      {measure.percent ? (
+                        <button type="button" onClick={() => toggleContributionSort(measure.key)} className="inline-flex items-center gap-1 hover:text-accent" aria-label={"Sort by " + measure.key}>
+                          Cont.%{sort.key === measure.key ? (sort.direction === "desc" ? <ChevronDown size={13} /> : <ChevronUp size={13} />) : <ChevronDown size={13} className="opacity-30" />}
+                        </button>
+                      ) : "Qty"}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, rowIndex) => (
                   <tr key={[row.category, ...dimensions.map((dimension) => row[dimension]), rowIndex].join("|")} className="border-b border-border/70 odd:bg-white/[0.025] hover:bg-white/[0.06]">
-                    {["category", ...dimensions].map((column, index) => (
+                    {dimensions.map((column, index) => (
                       <td key={column + index} className="whitespace-nowrap border-r border-border/60 px-3 py-2.5 text-text-primary">{row[column] ?? "-"}</td>
                     ))}
                     {MEASURES.map((measure, index) => (
