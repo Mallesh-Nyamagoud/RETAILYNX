@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import duckdb
 import pandas as pd
-
 from app.services import analysis, soh_analysis
 from app.services import base_stock_analysis as base_stock
 

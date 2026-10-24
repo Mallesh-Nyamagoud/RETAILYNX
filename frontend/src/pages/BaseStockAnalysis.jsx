@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarRange, ChevronDown, ChevronUp, Layers3 } from "lucide-react";
 import { baseStockApi } from "../api/client";
@@ -39,7 +39,12 @@ function showPercent(value) {
 export default function BaseStockAnalysis() {
   const [dimensions, setDimensions] = useState(["category"]);
   const [filters, setFilters] = useState({});
+  const [queryFilters, setQueryFilters] = useState({});
   const [sort, setSort] = useState({ key: "total_sales_contribution_pct", direction: "desc" });
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQueryFilters(filters), 350);
+    return () => window.clearTimeout(timer);
+  }, [filters]);
   const dimensionsQ = useQuery({
     queryKey: ["base-stock", "dimensions"],
     queryFn: baseStockApi.dimensions,
@@ -49,8 +54,9 @@ export default function BaseStockAnalysis() {
     queryFn: baseStockApi.slicers,
   });
   const analysisQ = useQuery({
-    queryKey: ["base-stock", "analysis", dimensions, filters],
-    queryFn: () => baseStockApi.analysis(dimensions, filters),
+    queryKey: ["base-stock", "analysis", dimensions, queryFilters],
+    queryFn: () => baseStockApi.analysis(dimensions, queryFilters),
+    placeholderData: (previousData) => previousData,
   });
 
   const catalog = dimensionsQ.data?.dimensions || [];
@@ -141,7 +147,7 @@ export default function BaseStockAnalysis() {
         <Card>
           <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-text-primary">Category Stock Position</h2>
+              <h2 className="text-sm font-semibold text-text-primary">Category Stock Position {analysisQ.isFetching && <span className="ml-2 text-xs font-normal text-text-muted">Updating…</span>}</h2>
               <p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString()} rows | sorted by {sortLabel} ({sort.direction === "desc" ? "highest first" : "lowest first"})</p>
             </div>
             <p className="text-xs text-text-muted">F4M = (Last 6M Sales / 6) * 4</p>

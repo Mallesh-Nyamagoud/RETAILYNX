@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
+from pathlib import Path
 
 import duckdb
 import pandas as pd
 
-from app.core.database import execute, execute_df, quote_ident
+from app.core.database import cache_token, execute, execute_df, quote_ident
 from app.services import analysis, soh_analysis
 from app.services.fy import safe_pct
 
@@ -63,14 +65,9 @@ def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd
         ("_brand_key", "_style_key"),
     )
     for keys in match_grains:
-        candidates = category_map.groupby(list(keys), dropna=False)["category"].agg(
-            lambda values: values.dropna().astype(str).unique().tolist()
-        ).reset_index()
-        candidates = candidates[candidates["category"].map(len) == 1]
-        lookup = {
-            tuple(row[key] for key in keys): row["category"][0]
-            for row in candidates.to_dict("records")
-        }
+        candidates = category_map[[*keys, "category"]].drop_duplicates()
+        candidates = candidates[~candidates.duplicated(subset=list(keys), keep=False)]
+        lookup = candidates.set_index(list(keys))["category"].to_dict()
         unresolved = stock["_mapped_category"].isna()
         indexes = stock.index[unresolved]
         mapped = [
@@ -88,6 +85,45 @@ def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd
     stock["category"] = stock["_mapped_category"]
     stock["_category_key"] = stock["category"].astype(str).str.strip().str.upper()
     return stock
+
+
+@lru_cache(maxsize=4)
+def _latest_stock_categories_cached(token: tuple, soh_path: str, soh_mtime_ns: int, soh_size: int):
+    """Prepare latest SOH rows once; filter changes reuse this expensive join."""
+    del token, soh_mtime_ns, soh_size
+    warnings: list[str] = []
+    with duckdb.connect(soh_path, read_only=True) as con:
+        stock_as_of = con.execute("SELECT MAX(CAST(date AS DATE)) FROM data").fetchone()[0]
+        stock = con.execute("""
+            SELECT name AS store, code AS brand_code, pc9 AS style, season,
+                   gc AS soh_category, SUM(qty) AS current_stock
+            FROM data
+            WHERE CAST(date AS DATE) = (SELECT MAX(CAST(date AS DATE)) FROM data)
+            GROUP BY ALL
+        """).df()
+    if stock.empty:
+        return stock, stock_as_of, ()
+    stock = soh_analysis._store_code_lookup(stock, warnings)
+    category_map = execute_df("""
+        SELECT adonis_store_code AS store_code, brand_code,
+               "Style_Code" AS style, "SEASON" AS season, category
+        FROM tertiary_data.data
+        WHERE category IS NOT NULL
+        GROUP BY ALL
+    """)
+    stock = _map_stock_categories(stock, category_map)
+    unmapped_qty = float(stock.loc[stock["category"].str.startswith("Unmapped SOH -"), "current_stock"].sum())
+    if unmapped_qty:
+        warnings.append(f"{unmapped_qty:,.0f} units from the latest SOH snapshot had no tertiary style match; they are listed by SOH category.")
+    return stock, stock_as_of, tuple(warnings)
+
+
+def _latest_stock_categories():
+    stat = Path(SOH_DB).stat()
+    stock, stock_as_of, warnings = _latest_stock_categories_cached(
+        cache_token(), str(SOH_DB), stat.st_mtime_ns, stat.st_size,
+    )
+    return stock.copy(), stock_as_of, warnings
 
 
 def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | None) -> dict:
@@ -134,34 +170,13 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
         combined = sales_rows
         stock_as_of = None
     else:
-        with duckdb.connect(str(SOH_DB), read_only=True) as con:
-            stock_as_of = con.execute("SELECT MAX(CAST(date AS DATE)) FROM data").fetchone()[0]
-            stock = con.execute("""
-                SELECT name AS store, code AS brand_code, pc9 AS style, season,
-                       gc AS soh_category, SUM(qty) AS current_stock
-                FROM data
-                WHERE CAST(date AS DATE) = (SELECT MAX(CAST(date AS DATE)) FROM data)
-                GROUP BY ALL
-            """).df()
+        stock, stock_as_of, stock_warnings = _latest_stock_categories()
+        warnings.extend(stock_warnings)
         if stock.empty:
             sales_rows["current_stock"] = 0.0
             warnings.append("No rows were found in the latest SOH snapshot; current stock is shown as 0.")
             combined = sales_rows
         else:
-            stock = soh_analysis._store_code_lookup(stock, warnings)
-            category_map = execute_df("""
-                SELECT adonis_store_code AS store_code, brand_code,
-                       "Style_Code" AS style, "SEASON" AS season, category
-                FROM tertiary_data.data
-                WHERE category IS NOT NULL
-                GROUP BY ALL
-            """)
-            stock = _map_stock_categories(stock, category_map)
-            mapped_qty = float(stock.loc[~stock["category"].str.startswith("Unmapped SOH -"), "current_stock"].sum())
-            total_stock = float(stock["current_stock"].sum())
-            unmapped_qty = total_stock - mapped_qty
-            if unmapped_qty:
-                warnings.append(f"{unmapped_qty:,.0f} units from the latest SOH snapshot had no tertiary style match; they are listed by SOH category.")
             master_dimensions = list(dict.fromkeys([*row_dimensions, *FILTER_COLUMNS]))
             master_select = ", ".join(quote_ident(column) for column in master_dimensions)
             master = execute_df(f"""
