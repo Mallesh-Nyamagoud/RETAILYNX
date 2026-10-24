@@ -162,7 +162,7 @@ export default function SohAnalysis() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="SOH Analysis"
+      <PageHeader eyebrow="SOH ANALYSIS" title="Stock Summary"
         description="Compare opening stock, tertiary net sales, signed secondary transfers and returns, closing stock by size, and sell-through."
         actions={<ExportButton onExport={handleExport} loading={exporting} disabled={!visibleRows.length || q.isLoading} />} />
       <Card><div className="grid gap-4 sm:grid-cols-2">

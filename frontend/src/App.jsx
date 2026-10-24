@@ -47,7 +47,8 @@ export default function App() {
           <Route path="/store-master" element={<StoreMaster />} />
           <Route path="/sql-platform" element={<SqlPlatform />} />
           <Route path="/css-stock" element={<CssStockTracking />} />
-          <Route path="/soh" element={<SohAnalysis />} />
+          <Route path="/soh" element={<Navigate to="/soh/summary" replace />} />
+          <Route path="/soh/summary" element={<SohAnalysis />} />
           <Route path="/admin/users" element={<ProtectedRoute requireAdmin><AdminUsers /></ProtectedRoute>} />
         </Route>
       </Routes>

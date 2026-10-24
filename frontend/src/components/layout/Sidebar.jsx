@@ -1,5 +1,6 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import clsx from "clsx";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -8,6 +9,7 @@ import {
   BarChart3,
   PackageSearch,
   Boxes,
+  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
@@ -27,12 +29,19 @@ const NAV_ITEMS = [
   { to: "/sql-platform", label: "SQL Platform", icon: TerminalSquare, numeral: "III" },
   { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3, numeral: "IV" },
   { to: "/css-stock", label: "Order-to-Transformation Tracker", icon: PackageSearch, numeral: "V" },
-  { to: "/soh", label: "SOH Analysis", icon: Boxes, numeral: "VI" },
 ];
 
 export default function Sidebar() {
   const collapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const sohActive = location.pathname.startsWith("/soh");
+  const [sohExpanded, setSohExpanded] = useState(sohActive);
+
+  useEffect(() => {
+    if (sohActive) setSohExpanded(true);
+  }, [sohActive]);
 
   return (
     <aside
@@ -130,6 +139,22 @@ export default function Sidebar() {
             )}
           </NavLink>
         ))}
+        <div>
+          <button type="button" aria-expanded={sohExpanded} aria-controls="soh-subpages"
+            title={collapsed ? "SOH Analysis" : undefined}
+            onClick={() => collapsed ? navigate("/soh/summary") : setSohExpanded((expanded) => !expanded)}
+            className={clsx("group relative flex w-full items-center rounded-lg text-sm font-medium transition-all duration-200", collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-2.5 py-2", sohActive ? "bg-accent-soft text-accent shadow-sm" : "text-text-secondary hover:bg-card-hover hover:text-text-primary")}>
+            <span className={clsx("absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-accent transition-opacity duration-200", sohActive ? "opacity-100" : "opacity-0 group-hover:opacity-40")} />
+            <span className={clsx("relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-all duration-200", sohActive ? "bg-gradient-to-br from-accent to-accent-hover text-white shadow-sm" : "bg-base/70 text-text-muted group-hover:bg-card-hover group-hover:text-text-primary")}>
+              <Boxes size={15} />
+              {collapsed && <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-surface font-display text-[8px] font-bold text-text-muted">VI</span>}
+            </span>
+            {!collapsed && <><span className="min-w-0 flex-1 truncate text-left">SOH Analysis</span><ChevronDown size={14} className={clsx("shrink-0 transition-transform", sohExpanded && "rotate-180")} /></>}
+          </button>
+          {!collapsed && sohExpanded && <div id="soh-subpages" className="ml-[22px] mt-1 space-y-1 border-l border-border/80 pl-3">
+            <NavLink to="/soh/summary" className={({ isActive }) => clsx("block rounded-md px-3 py-2 text-xs font-medium transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-muted hover:bg-card-hover hover:text-text-primary")}>Stock Summary</NavLink>
+          </div>}
+        </div>
       </nav>
 
       <button
