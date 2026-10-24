@@ -20,12 +20,13 @@ class BaseStockAnalysisTests(unittest.TestCase):
         base_stock.SOH_DB = Path(self.path)
         with duckdb.connect(self.path) as con:
             con.execute("""create table data (
-                date timestamp, name varchar, brand varchar, code varchar,
-                gc varchar, pc9 varchar, season varchar, qty bigint
+                date timestamp, "Store Name" varchar, brand varchar, "Brand Code" varchar,
+                gc varchar, "Style Code" varchar, season varchar, quantity bigint,
+                "Category Group" varchar, category varchar, subcategory varchar
             )""")
-            con.executemany("insert into data values (?, ?, ?, ?, ?, ?, ?, ?)", [
-                ("2026-09-01", "STORE A", "BRAND A", "B1", "MENS TOPS", "STYLE-1", "SEASON-1", 99),
-                ("2026-10-01", "STORE A", "BRAND A", "B1", "MENS TOPS", "STYLE-1", "SEASON-1", 20),
+            con.executemany("insert into data values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+                ("2026-09-01", "STORE A", "BRAND A", "B1", "MENS TOPS", "STYLE-1", "SEASON-1", 99, "TOPS", None, None),
+                ("2026-10-01", "STORE A", "BRAND A", "B1", "MENS TOPS", "STYLE-1", "SEASON-1", 20, "TOPS", None, None),
             ])
 
     def tearDown(self):
@@ -45,13 +46,13 @@ class BaseStockAnalysisTests(unittest.TestCase):
     def test_latest_snapshot_stock_maps_to_tertiary_category_and_calculates_measures(self):
         sales = pd.DataFrame([{
             "category": "SHIRTS", "_category_key": "SHIRTS",
-            "category_group": "M-DENIM", "subcategory": "DENIM",
+            "category_group": "TOPS", "subcategory": "DENIM",
             "retailer_name": "STORE A", "total_sales": 100,
             "last_6m_sales": 24,
         }])
         category_map = pd.DataFrame([{
             "store_code": "STORE-A", "brand_code": "B1", "style": "STYLE-1",
-            "season": "SEASON-1", "category_group": "M-DENIM",
+            "season": "SEASON-1", "category_group": "TOPS",
             "category": "SHIRTS", "subcategory": "DENIM",
         }])
         master = pd.DataFrame([{
@@ -74,7 +75,7 @@ class BaseStockAnalysisTests(unittest.TestCase):
                 ["category_group", "category", "subcategory", "retailer_name"],
                 {
                     "brand": ["BRAND A"], "retailer_name": ["STORE A"],
-                    "store_status": ["Active"], "category_group": ["M-DENIM"],
+                    "store_status": ["Active"], "category_group": ["TOPS"],
                     "season": ["SEASON-1"],
                 },
             )
@@ -82,14 +83,14 @@ class BaseStockAnalysisTests(unittest.TestCase):
         sales_query, sales_params = execute_df_mock.call_args_list[0].args
         self.assertIn('f."CG"', sales_query)
         self.assertIn('f."SEASON"', sales_query)
-        self.assertEqual(sales_params[-2:], ["M-DENIM", "SEASON-1"])
+        self.assertEqual(sales_params[-2:], ["TOPS", "SEASON-1"])
         self.assertEqual(result["stock_as_of"], "2026-10-01")
         self.assertEqual(result["last_6m_start"], "2026-04-01")
         self.assertEqual(len(result["rows"]), 1)
         row = result["rows"][0]
         self.assertEqual(
             (row["category_group"], row["category"], row["subcategory"], row["retailer_name"]),
-            ("M-DENIM", "SHIRTS", "DENIM", "STORE A"),
+            ("TOPS", "SHIRTS", "DENIM", "STORE A"),
         )
         self.assertEqual(row["current_stock"], 20)
         self.assertEqual(row["total_sales"], 100)
@@ -98,6 +99,24 @@ class BaseStockAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(row["st_pct"], 120)
         self.assertAlmostEqual(row["f4m_requirement"], 16)
         self.assertAlmostEqual(row["requirement"], 4)
+
+    def test_soh_category_group_is_preserved_while_missing_subcategory_is_filled(self):
+        stock = pd.DataFrame([{
+            "store_code": "STORE-A", "brand_code": "B1", "style": "S1",
+            "season": "H1", "soh_category": "MENS TOPS", "current_stock": 8,
+            "category_group": "TOPS", "category": "SHIRTS", "subcategory": None,
+        }])
+        category_map = pd.DataFrame([{
+            "store_code": "STORE-A", "brand_code": "B1", "style": "S1",
+            "season": "H1", "category_group": "OTHER", "category": "SHIRTS",
+            "subcategory": "DENIM",
+        }])
+
+        result = base_stock._map_stock_categories(stock, category_map)
+
+        self.assertEqual(result.loc[0, "category_group"], "TOPS")
+        self.assertEqual(result.loc[0, "category"], "SHIRTS")
+        self.assertEqual(result.loc[0, "subcategory"], "DENIM")
 
     def test_unmatched_styles_keep_stock_visible_under_soh_category(self):
         stock = pd.DataFrame([

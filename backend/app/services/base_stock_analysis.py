@@ -71,20 +71,27 @@ def _filters_for_request(filters: dict[str, list[str]] | None) -> dict[str, list
 
 
 def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd.DataFrame:
-    """Map SOH stock to tertiary category, category group, and subcategory."""
+    """Keep SOH product fields; use tertiary history only to fill missing fields."""
     stock = stock.copy()
     category_map = category_map.copy()
     key_fields = (("store_code", "_store_key"), ("brand_code", "_brand_key"),
                   ("style", "_style_key"), ("season", "_season_key"))
-    output_fields = ("category", "category_group", "subcategory")
+    output_fields = ("category_group", "category", "subcategory")
     for frame in (stock, category_map):
         for source, normalized in key_fields:
             frame[normalized] = frame[source].map(_norm)
     for column in output_fields:
+        if column not in stock:
+            stock[column] = None
+        if column not in category_map:
+            category_map[column] = ""
         category_map[column] = category_map[column].fillna("").astype(str).str.strip()
+        stock[column] = stock[column].map(
+            lambda value: None if pd.isna(value) or not str(value).strip() else str(value).strip()
+        )
     category_map = category_map[category_map["category"] != ""]
     for column in output_fields:
-        stock[f"_mapped_{column}"] = None
+        stock[f"_mapped_{column}"] = stock[column]
 
     match_grains = (
         ("_store_key", "_brand_key", "_style_key", "_season_key"),
@@ -99,15 +106,18 @@ def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd
             tuple(row[key] for key in keys): tuple(row[column] for column in output_fields)
             for row in candidates.to_dict("records")
         }
-        unresolved = stock["_mapped_category"].isna()
+        unresolved = stock[[f"_mapped_{column}" for column in output_fields]].isna().any(axis=1)
         indexes = stock.index[unresolved]
         mapped = [
             lookup.get(tuple(values))
             for values in stock.loc[indexes, list(keys)].itertuples(index=False, name=None)
         ]
         for offset, column in enumerate(output_fields):
-            stock.loc[indexes, f"_mapped_{column}"] = [
-                value[offset] if value else None for value in mapped
+            fill_indexes = indexes[stock.loc[indexes, f"_mapped_{column}"].isna()]
+            stock.loc[fill_indexes, f"_mapped_{column}"] = [
+                value[offset] if value else None
+                for value, keep in zip(mapped, stock.loc[indexes, f"_mapped_{column}"].isna())
+                if keep
             ]
 
     unmapped = stock["_mapped_category"].isna()
@@ -122,32 +132,77 @@ def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd
     return stock
 
 
+def _find_source_column(columns: list[str], *candidates: str) -> str | None:
+    normalized = {
+        re.sub(r"[^a-z0-9]", "", column.lower()): column
+        for column in columns
+    }
+    for candidate in candidates:
+        match = normalized.get(re.sub(r"[^a-z0-9]", "", candidate.lower()))
+        if match:
+            return match
+    return None
+
+
 @lru_cache(maxsize=4)
 def _latest_stock_categories_cached(token: tuple, soh_path: str, soh_mtime_ns: int, soh_size: int):
     """Prepare latest SOH rows once; filter changes reuse this expensive join."""
     del token, soh_mtime_ns, soh_size
     warnings: list[str] = []
     with duckdb.connect(soh_path, read_only=True) as con:
-        stock_as_of = con.execute("SELECT MAX(CAST(date AS DATE)) FROM data").fetchone()[0]
-        stock = con.execute("""
-            SELECT name AS store, code AS brand_code, pc9 AS style, season,
-                   gc AS soh_category, SUM(qty) AS current_stock
+        columns = [row[0] for row in con.execute("DESCRIBE data").fetchall()]
+        source = {
+            "store": _find_source_column(columns, "name", "store", "store_name", "retailer_name", "retailer name"),
+            "brand_code": _find_source_column(columns, "code", "brand_code"),
+            "style": _find_source_column(columns, "pc9", "style", "style_code"),
+            "season": _find_source_column(columns, "season", "season_name"),
+            "category_group": _find_source_column(columns, "category_group", "category group", "categorygroup", "cg"),
+            "category": _find_source_column(columns, "category"),
+            "subcategory": _find_source_column(columns, "subcategory", "sub_category", "sub category"),
+            "soh_category": _find_source_column(columns, "gc"),
+            "qty": _find_source_column(columns, "qty", "quantity", "current_qty", "current_stock", "stock_qty"),
+            "date": _find_source_column(columns, "date", "snapshot_date", "soh_date"),
+        }
+        required = ("store", "brand_code", "qty", "date")
+        missing = [column for column in required if source[column] is None]
+        if missing:
+            raise ValueError(f"SOH source is missing required columns: {missing}")
+        select_fields = [
+            f"{quote_ident(source['store'])} AS store",
+            f"{quote_ident(source['brand_code'])} AS brand_code",
+            f"{quote_ident(source['style'])} AS style" if source["style"] else "NULL AS style",
+            f"{quote_ident(source['season'])} AS season" if source["season"] else "NULL AS season",
+        ]
+        for field in ("category_group", "category", "subcategory"):
+            expression = quote_ident(source[field]) if source[field] else "NULL"
+            select_fields.append(f"{expression} AS {field}")
+        soh_category_expr = quote_ident(source["soh_category"]) if source["soh_category"] else "NULL"
+        select_fields.append(f"{soh_category_expr} AS soh_category")
+        select_fields.append(f"SUM({quote_ident(source['qty'])}) AS current_stock")
+        stock_as_of = con.execute(
+            f"SELECT MAX(CAST({quote_ident(source['date'])} AS DATE)) FROM data"
+        ).fetchone()[0]
+        stock = con.execute(f"""
+            SELECT {", ".join(select_fields)}
             FROM data
-            WHERE CAST(date AS DATE) = (SELECT MAX(CAST(date AS DATE)) FROM data)
+            WHERE CAST({quote_ident(source['date'])} AS DATE) = (
+                SELECT MAX(CAST({quote_ident(source['date'])} AS DATE)) FROM data
+            )
             GROUP BY ALL
         """).df()
     if stock.empty:
         return stock, stock_as_of, ()
     stock = soh_analysis._store_code_lookup(stock, warnings)
-    category_map = execute_df("""
-        SELECT adonis_store_code AS store_code, brand_code,
-               "Style_Code" AS style, "SEASON" AS season,
-               "CG" AS category_group, category, sub_category AS subcategory
-        FROM tertiary_data.data
-        WHERE category IS NOT NULL
-        GROUP BY ALL
-    """)
-    stock = _map_stock_categories(stock, category_map)
+    if stock[["category_group", "category", "subcategory"]].isna().any().any():
+        category_map = execute_df("""
+            SELECT adonis_store_code AS store_code, brand_code,
+                   "Style_Code" AS style, "SEASON" AS season,
+                   "CG" AS category_group, category, sub_category AS subcategory
+            FROM tertiary_data.data
+            WHERE category IS NOT NULL
+            GROUP BY ALL
+        """)
+        stock = _map_stock_categories(stock, category_map)
     unmapped_qty = float(stock.loc[stock["category"].str.startswith("Unmapped SOH -"), "current_stock"].sum())
     if unmapped_qty:
         warnings.append(f"{unmapped_qty:,.0f} units from the latest SOH snapshot had no tertiary style match; they are listed by SOH category.")
