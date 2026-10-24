@@ -7,6 +7,7 @@ import StoreMaster from "./pages/StoreMaster";
 import SqlPlatform from "./pages/SqlPlatform";
 import CssStockTracking from "./pages/CssStockTracking";
 import SohAnalysis from "./pages/SohAnalysis";
+import BaseStockAnalysis from "./pages/BaseStockAnalysis";
 import AdminUsers from "./pages/AdminUsers";
 import Login from "./pages/Login";
 import { useAuthStore } from "./store/useAuthStore";
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/css-stock" element={<CssStockTracking />} />
           <Route path="/soh" element={<Navigate to="/soh/summary" replace />} />
           <Route path="/soh/summary" element={<SohAnalysis />} />
+          <Route path="/soh/base-stock" element={<BaseStockAnalysis />} />
           <Route path="/admin/users" element={<ProtectedRoute requireAdmin><AdminUsers /></ProtectedRoute>} />
         </Route>
       </Routes>

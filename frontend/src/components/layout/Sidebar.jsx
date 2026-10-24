@@ -153,6 +153,7 @@ export default function Sidebar() {
           </button>
           {!collapsed && sohExpanded && <div id="soh-subpages" className="ml-[22px] mt-1 space-y-1 border-l border-border/80 pl-3">
             <NavLink to="/soh/summary" className={({ isActive }) => clsx("block rounded-md px-3 py-2 text-xs font-medium transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-muted hover:bg-card-hover hover:text-text-primary")}>Stock Summary</NavLink>
+            <NavLink to="/soh/base-stock" className={({ isActive }) => clsx("block rounded-md px-3 py-2 text-xs font-medium transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-muted hover:bg-card-hover hover:text-text-primary")}>Base Stock Analysis</NavLink>
           </div>}
         </div>
       </nav>

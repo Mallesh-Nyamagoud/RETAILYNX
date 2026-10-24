@@ -5,6 +5,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class BaseStockRequest(BaseModel):
+    hierarchy: list[str] = Field(default_factory=list)
+    filters: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class PivotRequest(BaseModel):
     dimensions: list[str] = Field(default_factory=list)
     filters: dict[str, list[str]] = Field(default_factory=dict)

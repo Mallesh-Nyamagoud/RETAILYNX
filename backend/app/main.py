@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import (
     auth,
+    base_stock,
     bill_kpi,
     css_stock,
     meta,
@@ -77,6 +78,7 @@ app.include_router(tertiary.router, prefix=API_PREFIX)
 app.include_router(store_master.router, prefix=API_PREFIX)
 app.include_router(css_stock.router, prefix=API_PREFIX)
 app.include_router(soh.router, prefix=API_PREFIX)
+app.include_router(base_stock.router, prefix=API_PREFIX)
 app.include_router(bill_kpi.router, prefix=API_PREFIX)
 
 

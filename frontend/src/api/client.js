@@ -162,6 +162,16 @@ export const sohApi = {
 };
 
 // ---------------------------------------------------------------------------
+// Base Stock Analysis
+// ---------------------------------------------------------------------------
+export const baseStockApi = {
+  dimensions: () => http.get("/base-stock/dimensions").then((r) => r.data),
+  slicers: () => http.get("/base-stock/slicers").then((r) => r.data),
+  analysis: (hierarchy, filters) =>
+    http.post("/base-stock/analysis", { hierarchy, filters }).then((r) => r.data),
+};
+
+// ---------------------------------------------------------------------------
 // Store Master
 // ---------------------------------------------------------------------------
 export const storeMasterApi = {
