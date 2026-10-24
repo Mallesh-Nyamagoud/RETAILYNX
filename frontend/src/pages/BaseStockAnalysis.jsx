@@ -37,7 +37,7 @@ function showPercent(value) {
 }
 
 export default function BaseStockAnalysis() {
-  const [dimensions, setDimensions] = useState(["category"]);
+  const [dimensions, setDimensions] = useState(["category_group", "category", "subcategory"]);
   const [filters, setFilters] = useState({});
   const [queryFilters, setQueryFilters] = useState({});
   const [sort, setSort] = useState({ key: "total_sales_contribution_pct", direction: "desc" });
@@ -68,6 +68,9 @@ export default function BaseStockAnalysis() {
     ...Object.fromEntries(pickerDimensions.map(({ column, label }) => [column, label])),
     retailer_name: "Store",
     store_status: "Store Status",
+    category_group: "Category Group",
+    subcategory: "Subcategory",
+    season: "Season",
   }), [pickerDimensions]);
   const rows = useMemo(() => {
     const result = [...(analysisQ.data?.rows || [])];
@@ -110,7 +113,7 @@ export default function BaseStockAnalysis() {
                 onChange={(next) => setDimensions(next.includes("category") ? next : [...next, "category"])}
               />
               <p className="mt-2 flex items-center gap-1.5 text-xs text-text-muted">
-                <Layers3 size={13} /> Category stays in the row hierarchy; additional dimensions can be added and reordered.
+                <Layers3 size={13} /> Category, Category Group, and Subcategory are mapped from the sales data; add or reorder row dimensions as needed.
               </p>
             </div>
           )}

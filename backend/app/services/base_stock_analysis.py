@@ -13,19 +13,48 @@ from app.services import analysis, soh_analysis
 from app.services.fy import safe_pct
 
 SOH_DB = soh_analysis.SOH_DB
-FILTER_COLUMNS = ("brand", "retailer_name", "store_status")
+STORE_FILTER_COLUMNS = ("brand", "retailer_name", "store_status")
+PRODUCT_FILTER_COLUMNS = ("category_group", "season")
+PRODUCT_DIMENSION_COLUMNS = ("category_group", "subcategory", "season")
+FILTER_COLUMNS = (*STORE_FILTER_COLUMNS, *PRODUCT_FILTER_COLUMNS)
 
 
 def get_dimensions() -> list[dict]:
-    """The category is fixed; remaining row dimensions follow Tertiary Analysis."""
-    return [{"column": "category", "label": "Category", "type": "VARCHAR"}] + [
-        item for item in analysis.get_dimension_catalog() if item["column"] != "category"
+    """Expose tertiary product attributes and the Store Master row dimensions."""
+    product_dimensions = [
+        {"column": "category", "label": "Category", "type": "VARCHAR"},
+        {"column": "category_group", "label": "Category Group", "type": "VARCHAR"},
+        {"column": "subcategory", "label": "Subcategory", "type": "VARCHAR"},
+        {"column": "season", "label": "Season", "type": "VARCHAR"},
+    ]
+    product_columns = {item["column"] for item in product_dimensions}
+    return product_dimensions + [
+        item for item in analysis.get_dimension_catalog()
+        if item["column"] not in product_columns
     ]
 
 
 def get_slicers() -> dict[str, list[str]]:
     available = analysis.get_slicer_options()
-    return {column: available.get(column, []) for column in FILTER_COLUMNS if column in available}
+    result = {column: available.get(column, []) for column in STORE_FILTER_COLUMNS if column in available}
+    result.update(_product_slicer_options(cache_token()))
+    return result
+
+
+@lru_cache(maxsize=4)
+def _product_slicer_options(_token: tuple) -> dict[str, list[str]]:
+    rows = execute_df("""
+        SELECT DISTINCT TRIM(CAST("CG" AS VARCHAR)) AS category_group,
+                        TRIM(CAST("SEASON" AS VARCHAR)) AS season
+        FROM tertiary_data.data
+        WHERE "CG" IS NOT NULL OR "SEASON" IS NOT NULL
+    """)
+    if rows.empty:
+        return {"category_group": [], "season": []}
+    return {
+        column: sorted(rows[column].dropna().astype(str).loc[lambda values: values.str.len() > 0].unique().tolist())
+        for column in PRODUCT_FILTER_COLUMNS
+    }
 
 
 def _norm(value) -> str:
@@ -42,21 +71,20 @@ def _filters_for_request(filters: dict[str, list[str]] | None) -> dict[str, list
 
 
 def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd.DataFrame:
-    """Map SOH stock to tertiary categories by store, brand, style, and season.
-
-    Some current stock styles have no tertiary history. Retain those quantities
-    under an explicit SOH category label instead of silently dropping them.
-    """
+    """Map SOH stock to tertiary category, category group, and subcategory."""
     stock = stock.copy()
     category_map = category_map.copy()
-    fields = (("store_code", "_store_key"), ("brand_code", "_brand_key"),
-              ("style", "_style_key"), ("season", "_season_key"))
+    key_fields = (("store_code", "_store_key"), ("brand_code", "_brand_key"),
+                  ("style", "_style_key"), ("season", "_season_key"))
+    output_fields = ("category", "category_group", "subcategory")
     for frame in (stock, category_map):
-        for source, normalized in fields:
+        for source, normalized in key_fields:
             frame[normalized] = frame[source].map(_norm)
-    category_map["category"] = category_map["category"].astype(str).str.strip()
+    for column in output_fields:
+        category_map[column] = category_map[column].fillna("").astype(str).str.strip()
     category_map = category_map[category_map["category"] != ""]
-    stock["_mapped_category"] = None
+    for column in output_fields:
+        stock[f"_mapped_{column}"] = None
 
     match_grains = (
         ("_store_key", "_brand_key", "_style_key", "_season_key"),
@@ -65,16 +93,22 @@ def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd
         ("_brand_key", "_style_key"),
     )
     for keys in match_grains:
-        candidates = category_map[[*keys, "category"]].drop_duplicates()
+        candidates = category_map[[*keys, *output_fields]].drop_duplicates()
         candidates = candidates[~candidates.duplicated(subset=list(keys), keep=False)]
-        lookup = candidates.set_index(list(keys))["category"].to_dict()
+        lookup = {
+            tuple(row[key] for key in keys): tuple(row[column] for column in output_fields)
+            for row in candidates.to_dict("records")
+        }
         unresolved = stock["_mapped_category"].isna()
         indexes = stock.index[unresolved]
         mapped = [
             lookup.get(tuple(values))
             for values in stock.loc[indexes, list(keys)].itertuples(index=False, name=None)
         ]
-        stock.loc[indexes, "_mapped_category"] = mapped
+        for offset, column in enumerate(output_fields):
+            stock.loc[indexes, f"_mapped_{column}"] = [
+                value[offset] if value else None for value in mapped
+            ]
 
     unmapped = stock["_mapped_category"].isna()
     unmapped_qty = float(stock.loc[unmapped, "current_stock"].sum())
@@ -82,7 +116,8 @@ def _map_stock_categories(stock: pd.DataFrame, category_map: pd.DataFrame) -> pd
         stock.loc[unmapped, "_mapped_category"] = stock.loc[unmapped, "soh_category"].map(
             lambda value: "Unmapped SOH - " + (str(value).strip() if pd.notna(value) and str(value).strip() else "Unclassified")
         )
-    stock["category"] = stock["_mapped_category"]
+    for column in output_fields:
+        stock[column] = stock[f"_mapped_{column}"]
     stock["_category_key"] = stock["category"].astype(str).str.strip().str.upper()
     return stock
 
@@ -106,7 +141,8 @@ def _latest_stock_categories_cached(token: tuple, soh_path: str, soh_mtime_ns: i
     stock = soh_analysis._store_code_lookup(stock, warnings)
     category_map = execute_df("""
         SELECT adonis_store_code AS store_code, brand_code,
-               "Style_Code" AS style, "SEASON" AS season, category
+               "Style_Code" AS style, "SEASON" AS season,
+               "CG" AS category_group, category, sub_category AS subcategory
         FROM tertiary_data.data
         WHERE category IS NOT NULL
         GROUP BY ALL
@@ -134,7 +170,19 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
         raise ValueError(f"Unknown row dimension(s): {invalid}")
     row_dimensions = [column for column in hierarchy if column != "category"]
     selected_filters = _filters_for_request(filters)
-    filter_sql, filter_params = analysis._build_filter_sql(selected_filters)
+    store_filters = {column: selected_filters[column] for column in STORE_FILTER_COLUMNS if column in selected_filters}
+    filter_sql, filter_params = analysis._build_filter_sql(store_filters)
+    product_filter_sql = []
+    product_filter_params = []
+    if selected_filters.get("category_group"):
+        values = selected_filters["category_group"]
+        product_filter_sql.append(f' AND TRIM(CAST(f."CG" AS VARCHAR)) IN ({",".join(["?"] * len(values))})')
+        product_filter_params.extend(values)
+    if selected_filters.get("season"):
+        values = selected_filters["season"]
+        product_filter_sql.append(f' AND TRIM(CAST(f."SEASON" AS VARCHAR)) IN ({",".join(["?"] * len(values))})')
+        product_filter_params.extend(values)
+    filter_sql += "".join(product_filter_sql)
 
     latest = execute("""
         SELECT MAX(CAST(date AS DATE)) AS max_date,
@@ -147,7 +195,16 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
     sales_as_of = sales_as_of.date() if hasattr(sales_as_of, "date") else sales_as_of
     six_month_start = six_month_start.date() if hasattr(six_month_start, "date") else six_month_start
 
-    dim_select = ", ".join(f"dim.{quote_ident(column)} AS {quote_ident(column)}" for column in row_dimensions)
+    source_dimensions = {
+        "category_group": 'TRIM(CAST(f."CG" AS VARCHAR)) AS "category_group"',
+        "subcategory": 'TRIM(CAST(f.sub_category AS VARCHAR)) AS "subcategory"',
+        "season": 'TRIM(CAST(f."SEASON" AS VARCHAR)) AS "season"',
+    }
+    dim_select = ", ".join(
+        source_dimensions[column] if column in source_dimensions
+        else f"dim.{quote_ident(column)} AS {quote_ident(column)}"
+        for column in row_dimensions
+    )
     select_dims = f", {dim_select}" if dim_select else ""
     sales_rows = execute_df(f"""
         SELECT TRIM(CAST(f.category AS VARCHAR)) AS category,
@@ -159,7 +216,7 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
           ON f.adonis_store_code = dim.adonis_store_code AND f.brand_code = dim.brand_code
         WHERE f.category IS NOT NULL {filter_sql}
         GROUP BY ALL
-    """, [six_month_start, sales_as_of, *filter_params])
+    """, [six_month_start, sales_as_of, *filter_params, *product_filter_params])
     if sales_rows.empty:
         return {"rows": [], "warnings": [], "tertiary_as_of": sales_as_of.isoformat(), "last_6m_start": six_month_start.isoformat(), "stock_as_of": None}
 
@@ -177,7 +234,10 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
             warnings.append("No rows were found in the latest SOH snapshot; current stock is shown as 0.")
             combined = sales_rows
         else:
-            master_dimensions = list(dict.fromkeys([*row_dimensions, *FILTER_COLUMNS]))
+            master_dimensions = list(dict.fromkeys([
+                *[column for column in row_dimensions if column not in PRODUCT_DIMENSION_COLUMNS],
+                *STORE_FILTER_COLUMNS,
+            ]))
             master_select = ", ".join(quote_ident(column) for column in master_dimensions)
             master = execute_df(f"""
                 SELECT adonis_store_code AS store_code, brand_code, {master_select}

@@ -45,12 +45,14 @@ class BaseStockAnalysisTests(unittest.TestCase):
     def test_latest_snapshot_stock_maps_to_tertiary_category_and_calculates_measures(self):
         sales = pd.DataFrame([{
             "category": "SHIRTS", "_category_key": "SHIRTS",
+            "category_group": "M-DENIM", "subcategory": "DENIM",
             "retailer_name": "STORE A", "total_sales": 100,
             "last_6m_sales": 24,
         }])
         category_map = pd.DataFrame([{
             "store_code": "STORE-A", "brand_code": "B1", "style": "STYLE-1",
-            "season": "SEASON-1", "category": "SHIRTS",
+            "season": "SEASON-1", "category_group": "M-DENIM",
+            "category": "SHIRTS", "subcategory": "DENIM",
         }])
         master = pd.DataFrame([{
             "store_code": "STORE-A", "brand_code": "B1", "retailer_name": "STORE A",
@@ -65,19 +67,30 @@ class BaseStockAnalysisTests(unittest.TestCase):
             patch.object(analysis, "get_dimension_catalog", return_value=self._catalog()),
             patch.object(analysis, "_build_filter_sql", return_value=("", [])),
             patch.object(base_stock, "execute", return_value=[(date(2026, 9, 30), date(2026, 4, 1))]),
-            patch.object(base_stock, "execute_df", side_effect=[sales, category_map, master]),
+            patch.object(base_stock, "execute_df", side_effect=[sales, category_map, master]) as execute_df_mock,
             patch.object(soh_analysis, "_store_code_lookup", side_effect=resolve_store_codes),
         ):
             result = base_stock.run_analysis(
-                ["retailer_name", "category"],
-                {"brand": ["BRAND A"], "retailer_name": ["STORE A"], "store_status": ["Active"]},
+                ["category_group", "category", "subcategory", "retailer_name"],
+                {
+                    "brand": ["BRAND A"], "retailer_name": ["STORE A"],
+                    "store_status": ["Active"], "category_group": ["M-DENIM"],
+                    "season": ["SEASON-1"],
+                },
             )
 
+        sales_query, sales_params = execute_df_mock.call_args_list[0].args
+        self.assertIn('f."CG"', sales_query)
+        self.assertIn('f."SEASON"', sales_query)
+        self.assertEqual(sales_params[-2:], ["M-DENIM", "SEASON-1"])
         self.assertEqual(result["stock_as_of"], "2026-10-01")
         self.assertEqual(result["last_6m_start"], "2026-04-01")
         self.assertEqual(len(result["rows"]), 1)
         row = result["rows"][0]
-        self.assertEqual((row["category"], row["retailer_name"]), ("SHIRTS", "STORE A"))
+        self.assertEqual(
+            (row["category_group"], row["category"], row["subcategory"], row["retailer_name"]),
+            ("M-DENIM", "SHIRTS", "DENIM", "STORE A"),
+        )
         self.assertEqual(row["current_stock"], 20)
         self.assertEqual(row["total_sales"], 100)
         self.assertEqual(row["last_6m_sales"], 24)
@@ -93,13 +106,15 @@ class BaseStockAnalysisTests(unittest.TestCase):
             {"store_code": "STORE-A", "brand_code": "B1", "style": "UNSOLD", "season": "H1", "soh_category": "MENS BOTTOMS", "current_stock": 7},
         ])
         category_map = pd.DataFrame([
-            {"store_code": "STORE-A", "brand_code": "B1", "style": "S1", "season": "H1", "category": "SHIRTS"},
-            {"store_code": "STORE-A", "brand_code": "B1", "style": "S2", "season": "H1", "category": "T-SHIRTS"},
+            {"store_code": "STORE-A", "brand_code": "B1", "style": "S1", "season": "H1", "category_group": "DENIM", "category": "SHIRTS", "subcategory": "MENS"},
+            {"store_code": "STORE-A", "brand_code": "B1", "style": "S2", "season": "H1", "category_group": "DENIM", "category": "T-SHIRTS", "subcategory": "MENS"},
         ])
 
         result = base_stock._map_stock_categories(stock, category_map)
 
         self.assertEqual(result["category"].tolist(), ["SHIRTS", "T-SHIRTS", "Unmapped SOH - MENS BOTTOMS"])
+        self.assertEqual(result["category_group"].tolist(), ["DENIM", "DENIM", None])
+        self.assertEqual(result["subcategory"].tolist(), ["MENS", "MENS", None])
         self.assertEqual(result["current_stock"].sum(), 22)
 
 
