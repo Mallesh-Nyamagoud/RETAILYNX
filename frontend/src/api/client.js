@@ -95,6 +95,8 @@ export const secondaryApi = {
 // Tertiary Sales Analysis
 // ---------------------------------------------------------------------------
 export const tertiaryApi = {
+  summaryConfig: () => http.get("/tertiary/summary/config").then((r) => r.data),
+  summary: (rowDimension, filters) => http.post("/tertiary/summary", { row_dimension: rowDimension, filters }).then((r) => r.data),
   dimensions: () => http.get("/tertiary/dimensions").then((r) => r.data),
   slicers: () => http.get("/tertiary/slicers").then((r) => r.data),
   pivot: (dimensions, filters) =>

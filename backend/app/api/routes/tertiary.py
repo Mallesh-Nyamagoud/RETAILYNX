@@ -13,7 +13,7 @@ from app.models.schemas import (
     MonthwiseRequest,
     PivotRequest,
 )
-from app.services import analysis, bill_analysis
+from app.services import analysis, bill_analysis, tertiary_summary
 from app.services.excel_export import build_workbook
 
 router = APIRouter(prefix="/tertiary", tags=["tertiary-sales-analysis"], dependencies=[Depends(get_current_user)])
@@ -38,6 +38,16 @@ _MONTHWISE_RATIOS = [
 _MONTHWISE_GROWTH_KEYS = ["bill_val", "qty"]
 
 
+@router.get("/summary/config")
+def summary_config():
+    return tertiary_summary.config()
+
+@router.post("/summary")
+def summary(req: dict):
+    try:
+        return tertiary_summary.report(req.get("row_dimension", "brand"), req.get("filters", {}))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 @router.get("/dimensions")
 def dimensions():
     return {"dimensions": analysis.get_dimension_catalog()}
