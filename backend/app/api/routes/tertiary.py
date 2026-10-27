@@ -42,6 +42,9 @@ _MONTHWISE_GROWTH_KEYS = ["bill_val", "qty"]
 def summary_config():
     return tertiary_summary.config()
 
+@router.post("/summary/config")
+def summary_config_filtered(req: dict):
+    return tertiary_summary.config(req.get("filters", {}))
 @router.post("/summary")
 def summary(req: dict):
     try:

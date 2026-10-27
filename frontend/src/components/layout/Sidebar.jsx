@@ -28,6 +28,7 @@ const NAV_ITEMS = [
   { to: "/store-master", label: "Store Master", icon: Store, numeral: "II" },
   { to: "/sql-platform", label: "SQL Platform", icon: TerminalSquare, numeral: "III" },
   { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3, numeral: "IV" },
+  { to: "/tertiary/summary", label: "Tertiary Sales Summary", icon: BarChart3, numeral: null },
   { to: "/css-stock", label: "Order-to-Transformation Tracker", icon: PackageSearch, numeral: "V" },
 ];
 
@@ -77,7 +78,7 @@ export default function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === "/"}
+            end={item.to === "/" || item.to === "/tertiary"}
             title={collapsed ? item.label : undefined}
             className={({ isActive }) =>
               clsx(
