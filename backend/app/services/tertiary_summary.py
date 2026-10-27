@@ -1,11 +1,13 @@
 from __future__ import annotations
 from functools import lru_cache
 import calendar
+from datetime import date
 from app.core.database import cache_token, execute, execute_df, filter_key, quote_ident
 from app.services.analysis import _build_filter_sql
 FACT = "tertiary_data.data"
 JOIN = "LEFT JOIN store_master.store_details dim ON f.adonis_store_code=dim.adonis_store_code AND f.brand_code=dim.brand_code"
 CANDIDATES = {"store": ("retailer_name", "adonis_store_code"), "department": ("department",), "store_status": ("store_status",), "store_type": ("store_type",), "brand": ("brand", "brand_code"), "state": ("state", "state_name"), "group": ("group", "store_group")}
+
 
 def _fields():
     cols = {r[0] for r in execute("SELECT column_name FROM information_schema.columns WHERE table_catalog='store_master' AND table_name='store_details'")}
@@ -44,7 +46,10 @@ def _config_cached(filters_key, _token):
         month_clauses.append("(CASE WHEN month(f.date)>=4 THEN year(f.date) ELSE year(f.date)-1 END) IN (" + ",".join("?" for _ in selected_years) + ")")
     month_nums = [r[0] for r in execute(f"SELECT DISTINCT month(f.date)::INTEGER FROM {FACT} f {JOIN} WHERE {' AND '.join(month_clauses)} ORDER BY 1", dim_params + selected_years)]
     months = [{"value":i,"label":calendar.month_name[i]} for i in month_nums]
-    return {"fields":fields,"options":options,"years":years,"year_options":year_options,"months":months}
+    latest = execute(f"SELECT MAX(date) FROM {FACT}")[0][0]
+    current_fy = (latest.year if latest.month >= 4 else latest.year - 1) if latest else None
+    current_fy_partial = bool(latest and current_fy is not None and latest < date(current_fy + 1, 3, 31))
+    return {"fields":fields,"options":options,"years":years,"year_options":year_options,"months":months,"current_fy":current_fy,"current_fy_partial":current_fy_partial}
 def _anchor_and_months(filters, years):
     chosen = [int(v) for v in filters.get("fy",[]) if str(v).isdigit()]
     anchor = max(chosen) if chosen else (max(years) if years else None)
@@ -82,16 +87,16 @@ def _report_cached(row_dimension, filters_key, _token):
     GROUP BY 1,2 ORDER BY 1
     """
     df=execute_df(sql,params)
-    if df.empty: return {"years":years,"anchor":anchor,"rows":[],"totals":{}}
+    if df.empty: return {"years":years,"anchor":anchor,"current_fy":cfg["current_fy"],"current_fy_partial":cfg["current_fy_partial"],"rows":[],"totals":{}}
     df["label"]=df["label"].fillna("Unassigned").astype(str); rows=[]
     for name,sub in df.groupby("label",sort=True):
         by_year={}
         for y in years:
             cur=sub[sub.fy_start==y]; prev=sub[sub.fy_start==y-1]
-            by_year[str(y)]={"qty":float(cur.qty.sum()),"val":float(cur.val.sum()),"lfytd_qty":float(prev.ytd_qty.sum()),"lfytd_val":float(prev.ytd_val.sum())}
+            by_year[str(y)]={"qty":float(cur.qty.sum()),"val":float(cur.val.sum()),"lfytd_qty":float(cur.ytd_qty.sum()),"lfytd_val":float(cur.ytd_val.sum())}
         rows.append({"label":name,"years":by_year})
     totals={}
     for y in years:
         cur=df[df.fy_start==y]; prev=df[df.fy_start==y-1]
-        totals[str(y)]={"qty":float(cur.qty.sum()),"val":float(cur.val.sum()),"lfytd_qty":float(prev.ytd_qty.sum()),"lfytd_val":float(prev.ytd_val.sum())}
-    return {"years":years,"anchor":anchor,"rows":rows,"totals":totals}
+        totals[str(y)]={"qty":float(cur.qty.sum()),"val":float(cur.val.sum()),"lfytd_qty":float(cur.ytd_qty.sum()),"lfytd_val":float(cur.ytd_val.sum())}
+    return {"years":years,"anchor":anchor,"current_fy":cfg["current_fy"],"current_fy_partial":cfg["current_fy_partial"],"rows":rows,"totals":totals}
