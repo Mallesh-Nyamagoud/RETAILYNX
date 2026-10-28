@@ -771,6 +771,8 @@ def _monthwise_rows_cached(
     ratio_measures = ratio_measures or []
     growth_keys = growth_keys or []
     dims = _validate_dimensions(dimensions)
+    selected_months = [int(value) for value in filters.pop("month", []) if str(value).isdigit()]
+    selected_fys = [int(value) for value in filters.pop("fy", []) if str(value).isdigit()]
     filter_sql, filter_params = _build_filter_sql(filters)
 
     dim_select = "".join(
@@ -785,7 +787,17 @@ def _monthwise_rows_cached(
     )
 
     max_date = _get_global_max_date(fact)
-    fy = build_fy_context(max_date)
+    if max_date is None:
+        return {"rows": [], "months": [], "dimensions": dims, "measure_keys": [m["key"] for m in measures], "ratio_keys": [m["key"] for m in ratio_measures], "growth_keys": growth_keys, "fy_context": None}
+    current_fy = max_date.year if max_date.month >= FY_START_MONTH else max_date.year - 1
+    anchor_fy = max(selected_fys) if selected_fys else current_fy
+    # Use the selected fiscal year as the comparison anchor. A historical
+    # selection is a completed year; the live FY retains its actual max date.
+    anchor_max_date = max_date if anchor_fy >= current_fy else date(anchor_fy + 1, 3, 31)
+    fy = build_fy_context(anchor_max_date)
+    month_filter = ""
+    if selected_months:
+        month_filter = " AND month(f." + quote_ident(fact.date_column) + ") IN (" + ",".join("?" for _ in selected_months) + ")"
 
     sql = f"""
     WITH dim_joined AS (
@@ -798,7 +810,7 @@ def _monthwise_rows_cached(
             ON f.{quote_ident(fact.store_column)} = dim.adonis_store_code
            AND f.{quote_ident(fact.brand_column)} = dim.brand_code
         WHERE 1=1 {filter_sql}
-          AND f.{quote_ident(fact.date_column)} BETWEEN ?::DATE AND ?::DATE
+          AND f.{quote_ident(fact.date_column)} BETWEEN ?::DATE AND ?::DATE{month_filter}
     )
     SELECT
         {(dim_group_internal + ",") if dims else ""}
@@ -809,11 +821,14 @@ def _monthwise_rows_cached(
     FROM dim_joined
     GROUP BY {(dim_group_internal + ",") if dims else ""} fy_bucket, cal_year, cal_month
     """
-    params = filter_params + [fy.last_fy_start, fy.current_fy_end, fy.current_fy_start]
+    params = filter_params + [fy.last_fy_start, fy.current_fy_end] + selected_months + [fy.current_fy_start]
     df = execute_df(sql, params)
     df = df.rename(columns={f"dim__{d}": d for d in dims})
 
     months_seq = _fy_month_sequence(fy)
+    if selected_months:
+        selected_month_set = set(selected_months)
+        months_seq = [month for month in months_seq if month["cal_month"] in selected_month_set]
     measure_keys = [m["key"] for m in measures]
     value_key = growth_keys[0] if growth_keys else measure_keys[-1]
 
