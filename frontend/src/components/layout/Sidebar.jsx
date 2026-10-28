@@ -7,6 +7,7 @@ import {
   Store,
   TerminalSquare,
   BarChart3,
+  CalendarRange,
   PackageSearch,
   Boxes,
   ChevronDown,
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { to: "/sql-platform", label: "SQL Platform", icon: TerminalSquare, numeral: "III" },
   { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3, numeral: "IV" },
   { to: "/tertiary/summary", label: "Tertiary Sales Summary", icon: BarChart3, numeral: null },
+  { to: "/tertiary/monthwise", label: "Tertiary Monthwise Analysis", icon: CalendarRange, numeral: null },
   { to: "/css-stock", label: "Order-to-Transformation Tracker", icon: PackageSearch, numeral: "V" },
 ];
 

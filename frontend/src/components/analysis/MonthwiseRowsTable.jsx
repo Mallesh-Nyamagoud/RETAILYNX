@@ -115,7 +115,7 @@ export default function MonthwiseRowsTable({ result, dimensionLabels = {} }) {
 
     const ratioCols = (result?.ratio_keys || []).map((key) => ({
       accessorKey: key,
-      header: "Bill Discount %",
+      header: key === "discount_pct" ? "Discount Outflow %" : key.replaceAll("_", " ").toUpperCase(),
       size: 110,
       cell: ({ getValue }) => {
         const v = getValue();
