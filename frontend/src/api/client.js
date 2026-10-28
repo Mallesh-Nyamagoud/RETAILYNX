@@ -97,6 +97,7 @@ export const secondaryApi = {
 export const tertiaryApi = {
   summaryConfig: (filters = {}) => http.post("/tertiary/summary/config", { filters }).then((r) => r.data),
   summary: (rowDimension, filters) => http.post("/tertiary/summary", { row_dimension: rowDimension, filters }).then((r) => r.data),
+  kpiTracking: (dimension, filters) => http.post("/tertiary/kpi-tracking", { dimension, filters }).then((r) => r.data),
   dimensions: () => http.get("/tertiary/dimensions").then((r) => r.data),
   slicers: () => http.get("/tertiary/slicers").then((r) => r.data),
   pivot: (dimensions, filters) =>

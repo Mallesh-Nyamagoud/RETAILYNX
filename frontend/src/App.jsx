@@ -5,6 +5,7 @@ import SecondaryAnalysis from "./pages/SecondaryAnalysis";
 import TertiaryAnalysis from "./pages/TertiaryAnalysis";
 import TertiarySummary from "./pages/TertiarySummary";
 import TertiaryMonthwise from "./pages/TertiaryMonthwise";
+import TertiaryKpiTracking from "./pages/TertiaryKpiTracking";
 import StoreMaster from "./pages/StoreMaster";
 import SqlPlatform from "./pages/SqlPlatform";
 import CssStockTracking from "./pages/CssStockTracking";
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/tertiary" element={<TertiaryAnalysis />} />
           <Route path="/tertiary/summary" element={<TertiarySummary />} />
           <Route path="/tertiary/monthwise" element={<TertiaryMonthwise />} />
+          <Route path="/tertiary/kpi-tracking" element={<TertiaryKpiTracking />} />
           <Route path="/store-master" element={<StoreMaster />} />
           <Route path="/sql-platform" element={<SqlPlatform />} />
           <Route path="/css-stock" element={<CssStockTracking />} />

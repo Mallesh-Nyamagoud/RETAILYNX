@@ -13,7 +13,7 @@ from app.models.schemas import (
     MonthwiseRequest,
     PivotRequest,
 )
-from app.services import analysis, bill_analysis, tertiary_summary
+from app.services import analysis, bill_analysis, tertiary_summary, tertiary_kpi_tracking
 from app.services.excel_export import build_workbook
 
 router = APIRouter(prefix="/tertiary", tags=["tertiary-sales-analysis"], dependencies=[Depends(get_current_user)])
@@ -45,6 +45,17 @@ def summary_config():
 @router.post("/summary/config")
 def summary_config_filtered(req: dict):
     return tertiary_summary.config(req.get("filters", {}))
+@router.post("/kpi-tracking")
+def kpi_tracking(req: dict):
+    try:
+        return tertiary_kpi_tracking.run_kpi_tracking(
+            FACT,
+            req.get("filters", {}),
+            req.get("dimension", "store"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/summary")
 def summary(req: dict):
     try:
