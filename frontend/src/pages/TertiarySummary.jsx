@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Boxes, IndianRupee, SlidersHorizontal } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Boxes, IndianRupee, Search, SlidersHorizontal } from "lucide-react";
 import { tertiaryApi } from "../api/client";
 
 const pages = [["brand", "Brands comparison"], ["store", "Brand-store performance"], ["department", "Department-wise performance"], ["state", "State-wise performance"], ["group", "Group-wise performance"]];
@@ -9,17 +9,16 @@ const fmt = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 const pct = (a, b) => !b ? null : (a - b) / Math.abs(b) * 100;
 const fyName = (y) => "FY" + y + "-" + String(y + 1).slice(-2);
 
-function MultiFilter({ name, options, selected, onChange }) {
-  const [open, setOpen] = useState(false);
+function MultiFilter({ name, options, selected, onChange, open, onToggle, onClose }) {
   const [query, setQuery] = useState("");
   const visible = options.filter((v) => String(v.label).toLowerCase().includes(query.toLowerCase()));
   return <div className="relative min-w-[150px]">
-    <button type="button" onClick={() => setOpen(!open)} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs text-text-primary">{display(name)} <span className="float-right text-text-muted">{selected.length ? selected.length + " selected" : "All"}</span></button>
-    {open && <div className="absolute z-30 mt-1 max-h-72 w-64 overflow-auto rounded-xl border border-border bg-surface p-3 shadow-xl">
+    <button type="button" onClick={onToggle} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs text-text-primary">{display(name)} <span className="float-right text-text-muted">{selected.length ? selected.length + " selected" : "All"}</span></button>
+    {open && <div className={"absolute z-30 mt-1 max-h-72 w-64 overflow-auto rounded-xl border border-border bg-surface p-3 shadow-xl " + (name === "month" || name === "fy" ? "right-0" : "left-0")}>
       <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" className="mb-2 w-full rounded border border-border bg-base px-2 py-1.5 text-xs" />
       <div className="mb-2 flex justify-between text-xs"><button type="button" onClick={() => onChange([...new Set([...selected, ...visible.map((o) => String(o.value))])])}>Select all</button><button type="button" onClick={() => onChange([])}>Clear</button></div>
       {visible.map((opt) => <label key={opt.value} className="flex cursor-pointer items-center gap-2 py-1 text-xs"><input type="checkbox" checked={selected.includes(String(opt.value))} onChange={() => onChange(selected.includes(String(opt.value)) ? selected.filter((v) => v !== String(opt.value)) : [...selected, String(opt.value)])} />{opt.label}</label>)}
-      <button type="button" className="mt-2 w-full rounded bg-accent px-2 py-1 text-xs text-white" onClick={() => setOpen(false)}>Done</button>
+      <button type="button" className="mt-2 w-full rounded bg-accent px-2 py-1 text-xs text-white" onClick={onClose}>Done</button>
     </div>}
   </div>;
 }
@@ -56,6 +55,26 @@ function HistoryTable({ title, metric, rows, total, growth }) {
 
 function growthKey(metric) { return metric + "Growth"; }
 
+function ComparisonTable({ dimension, rows, groups, totals, anchor, currentPartial, search, setSearch }) {
+  const columnCount = 1 + groups.reduce((count, group) => count + group.cols.length, 0);
+  return <section className="overflow-hidden rounded-xl border border-border bg-surface">
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4"><div><h2 className="font-display font-semibold text-text-primary">{dimension} comparison</h2><p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString("en-IN")} rows | fiscal years in chronological order</p></div><div className="relative"><Search size={15} className="absolute left-3 top-2.5 text-text-muted"/><input aria-label="Search comparison rows" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={"Search " + dimension.toLowerCase() + " rows"} className="rounded-lg border border-border bg-base py-2 pl-9 pr-3 text-sm text-text-primary"/></div></header>
+    <div className="max-h-[62vh] overflow-auto"><table className="w-full min-w-max border-separate border-spacing-0 text-right text-xs">
+      <thead className="sticky top-0 z-10 bg-base text-text-secondary">
+        <tr><th rowSpan="3" className="sticky left-0 z-20 min-w-48 border-b border-r border-border bg-base px-4 py-3 text-left uppercase">{dimension}</th>{groups.map((group, index) => <th key={index} colSpan={group.cols.length} className="border-b border-border px-3 py-2 text-center">{group.type === "year" ? fyName(group.year) + (currentPartial && group.year === anchor ? " (CURRENT YTD)" : "") : "GROWTH"}</th>)}</tr>
+        <tr>{groups.flatMap((group, index) => group.type === "growth" ? [<th key={index + "gq"} rowSpan="2" className="border-b border-border px-3 py-2">QTY</th>, <th key={index + "gv"} rowSpan="2" className="border-b border-border px-3 py-2">VAL</th>] : group.cols.length === 4 ? [<th key={index + "q"} colSpan="2" className="border-b border-border px-3 py-2">QTY</th>, <th key={index + "v"} colSpan="2" className="border-b border-border px-3 py-2">VAL</th>] : [<th key={index + "q"} rowSpan="2" className="border-b border-border px-3 py-2">QTY</th>, <th key={index + "v"} rowSpan="2" className="border-b border-border px-3 py-2">VAL</th>])}</tr>
+        <tr>{groups.flatMap((group, index) => group.type === "year" && group.cols.length === 4 ? [<th key={index + "qf"} className="border-b border-border px-3 py-2">FY FULL</th>, <th key={index + "ql"} className="border-b border-border px-3 py-2">LFYTD</th>, <th key={index + "vf"} className="border-b border-border px-3 py-2">FY FULL</th>, <th key={index + "vl"} className="border-b border-border px-3 py-2">LFYTD</th>] : [])}</tr>
+      </thead>
+      <tbody>{rows.length ? rows.map((row) => <tr key={row.label} className="h-[38px] odd:bg-surface even:bg-base/60 hover:bg-accent-soft/50">
+        <th className="sticky left-0 border-b border-r border-border bg-inherit px-4 py-2 text-left font-medium text-text-primary">{row.label}</th>
+        {groups.flatMap((group, groupIndex) => group.type === "year" ? group.cols.map((column) => { const value = row.years[String(group.year)]?.[column] || 0; return <td key={groupIndex + "-" + column} className="border-b border-border px-3 py-2 tabular-nums text-text-primary">{column.includes("val") && <span>&#8377;</span>}{fmt.format(value)}</td>; }) : ["qty", "val"].map((metric) => { const baseRow = row.years[String(group.base)] || {}; const base = group.mode === "lfytd" ? baseRow["lfytd_" + metric] : baseRow[metric]; const value = pct(row.years[String(group.year)]?.[metric] || 0, base || 0); return <td key={groupIndex + "-" + metric} className="border-b border-border px-3 py-2"><GrowthValue value={value}/></td>; }))}
+      </tr>) : <tr><td colSpan={columnCount} className="px-4 py-8 text-center text-sm text-text-muted">No comparison rows match these filters.</td></tr>}</tbody>
+      <tfoot><tr className="border-t-2 border-accent bg-surface font-bold text-text-primary"><th className="border-t-2 border-accent px-4 py-3 text-left">Grand Total</th>{groups.flatMap((group, groupIndex) => group.type === "year" ? group.cols.map((column) => { const value = totals[String(group.year)]?.[column] || 0; return <td key={groupIndex + "-" + column} className="border-t-2 border-accent px-3 py-3 tabular-nums">{column.includes("val") && <span>&#8377;</span>}{fmt.format(value)}</td>; }) : ["qty", "val"].map((metric) => { const baseRow = totals[String(group.base)] || {}; const base = group.mode === "lfytd" ? baseRow["lfytd_" + metric] : baseRow[metric]; const value = pct(totals[String(group.year)]?.[metric] || 0, base || 0); return <td key={groupIndex + "-" + metric} className="border-t-2 border-accent px-3 py-3"><GrowthValue value={value}/></td>; }))}</tr></tfoot>
+    </table></div>
+  </section>;
+}
+
+
 export default function TertiarySummary() {
   const [config, setConfig] = useState(null);
   const [filters, setFilters] = useState({});
@@ -63,6 +82,18 @@ export default function TertiarySummary() {
   const [payload, setPayload] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [openFilter, setOpenFilter] = useState(null);
+  const filterPanelRef = useRef(null);
+
+  useEffect(() => {
+    if (!openFilter) return undefined;
+    const closeOnOutside = (event) => { if (!filterPanelRef.current?.contains(event.target)) setOpenFilter(null); };
+    const closeOnEscape = (event) => { if (event.key === "Escape") setOpenFilter(null); };
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => { document.removeEventListener("pointerdown", closeOnOutside); document.removeEventListener("keydown", closeOnEscape); };
+  }, [openFilter]);
 
   useEffect(() => {
     let active = true;
@@ -83,6 +114,15 @@ export default function TertiarySummary() {
   const currentPartial = Boolean(payload?.current_fy_partial && anchor === payload?.current_fy);
   const totals = payload?.totals || {};
   const availableYears = [...(payload?.years || [])].sort((a, b) => b - a);
+  const chronologicalYears = [...(payload?.years || [])].filter((year) => anchor == null || year <= anchor).sort((a, b) => a - b);
+  const comparisonGroups = chronologicalYears.flatMap((year, index) => {
+    const cols = currentPartial && year === anchor - 1 ? ["qty", "lfytd_qty", "val", "lfytd_val"] : ["qty", "val"];
+    const yearGroup = { type: "year", year, cols };
+    if (index === 0) return [yearGroup];
+    const isCurrentYtd = currentPartial && year === anchor;
+    return [yearGroup, { type: "growth", year, base: year - 1, mode: isCurrentYtd ? "lfytd" : "full", cols: ["qty", "val"] }];
+  });
+  const dataRows = (payload?.rows || []).filter((row) => String(row.label).toLowerCase().includes(search.toLowerCase()));
   const historicalRows = [];
 
   if (anchor != null && totals[String(anchor)]) {
@@ -108,9 +148,9 @@ export default function TertiarySummary() {
 
   return <main className="space-y-5 p-5 lg:p-7">
     <header><p className="text-xs font-semibold uppercase tracking-[.18em] text-accent">Retail sell-out</p><h1 className="mt-1 font-display text-2xl font-bold text-text-primary">Tertiary Sales Summary</h1><p className="mt-1 text-sm text-text-muted">Historical quantity and value performance across fiscal years</p></header>
-    <section className="flex flex-wrap gap-2 rounded-xl border border-border bg-surface p-3"><span className="flex items-center gap-1 self-center px-2 text-xs font-bold uppercase text-text-muted"><SlidersHorizontal size={14}/>Filters</span>{config && filterOrder.filter((f) => f === "month" || f === "fy" || config.fields[f]).map((name) => {
+    <section ref={filterPanelRef} className="flex flex-wrap gap-2 rounded-xl border border-border bg-surface p-3"><span className="flex items-center gap-1 self-center px-2 text-xs font-bold uppercase text-text-muted"><SlidersHorizontal size={14}/>Filters</span>{config && filterOrder.filter((f) => f === "month" || f === "fy" || config.fields[f]).map((name) => {
       const options = name === "month" ? config.months : name === "fy" ? (config.year_options || config.years).map((y) => ({ value: y, label: fyName(y) })) : (config.options[name] || []).map((v) => ({ value: v, label: v }));
-      return <MultiFilter key={name} name={name} options={options} selected={(filters[name] || []).map(String)} onChange={(v) => setFilter(name, v)} />;
+      return <MultiFilter key={name} name={name} options={options} selected={(filters[name] || []).map(String)} onChange={(v) => setFilter(name, v)} open={openFilter === name} onToggle={() => setOpenFilter((current) => current === name ? null : name)} onClose={() => setOpenFilter(null)} />;
     })}</section>
     <nav aria-label="Summary dimensions" className="flex gap-1 overflow-x-auto border-b border-border">{pages.filter(([key]) => key === "brand" || config?.fields[key]).map(([key, label]) => <button key={key} type="button" onClick={() => setPage(key)} className={"whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold " + (page === key ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text-primary")}>{label}</button>)}</nav>
     <section className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -118,5 +158,6 @@ export default function TertiarySummary() {
       {error && <p role="alert" className="border-b border-border px-4 py-3 text-sm text-negative">{error}</p>}
       <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-2"><HistoryTable title="QTY" metric="qty" rows={historicalRows} total={totals[String(anchor)]?.qty || 0} growth={historicalRows[0]?.qtyGrowth}/><HistoryTable title="VALUE" metric="val" rows={historicalRows} total={totals[String(anchor)]?.val || 0} growth={historicalRows[0]?.valGrowth}/></div>
     </section>
+    <ComparisonTable dimension={display(page)} rows={dataRows} groups={comparisonGroups} totals={totals} anchor={anchor} currentPartial={currentPartial} search={search} setSearch={setSearch}/>
   </main>;
 }
