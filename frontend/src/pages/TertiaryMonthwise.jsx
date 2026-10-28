@@ -39,7 +39,7 @@ export default function TertiaryMonthwise() {
   const [filters, setFilters] = useState({});
   const [openFilter, setOpenFilter] = useState(null);
   const filterPanelRef = useRef(null);
-  const [activeDimension, setActiveDimension] = useState("brand");
+  const [activeDimension, setActiveDimension] = useState("month");
   const [search, setSearch] = useState("");
   const configQ = useQuery({ queryKey: ["tertiary-monthwise", "filter-config", filters], queryFn: () => tertiaryApi.summaryConfig(filters) });
   const monthwiseQ = useQuery({ queryKey: ["tertiary-monthwise", filters], queryFn: () => tertiaryApi.monthwise([], filters) });
@@ -47,7 +47,7 @@ export default function TertiaryMonthwise() {
   const analysisQ = useQuery({ queryKey: ["tertiary-monthwise", "dimension", analysisDimension, filters], queryFn: () => tertiaryApi.summary(analysisDimension, filters) });
   const config = configQ.data;
   const filterNames = FILTER_ORDER.filter((name) => name === "month" || name === "fy" || config?.fields?.[name]);
-  const availableDimensions = [...DIMENSIONS.filter(([key]) => key === "brand" || config?.fields?.[key]), ["month", "Monthwise Analysis"]];
+  const availableDimensions = [["month", "Monthwise Analysis"], ...DIMENSIONS.filter(([key]) => key === "brand" || config?.fields?.[key])];
   const optionsFor = (name) => name === "month" ? (config?.months || []) : name === "fy" ? (config?.year_options || config?.years || []).map((year) => ({ value: year, label: fyLabel(year) })) : (config?.options?.[name] || []).map((value) => ({ value, label: value }));
   const setFilter = (name, values) => setFilters((current) => { const next = { ...current }; if (values.length) next[name] = values; else delete next[name]; return next; });
   const selectedMonths = (filters.month || []).map(Number);
