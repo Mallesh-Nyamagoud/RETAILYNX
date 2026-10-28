@@ -21,13 +21,11 @@ const HISTORY_MEASURES = [
 const ratio = (discount, mrp) => mrp ? (discount / mrp) * 100 : null;
 const changePct = (value, base) => base ? ((value - base) / Math.abs(base)) * 100 : null;
 const fyLabel = (year) => "FY" + year + "-" + String(Number(year) + 1).slice(-2);
-const FIRST_FISCAL_YEAR = 2023;
-function fiscalYearRange(years = [], anchor = null) {
-  const dataYears = years.map(Number).filter(Number.isFinite);
-  const lastYear = anchor == null ? (dataYears.length ? Math.max(...dataYears) : null) : Number(anchor);
-  if (lastYear == null || !Number.isFinite(lastYear)) return dataYears.sort((a, b) => a - b);
-  const firstYear = Math.min(FIRST_FISCAL_YEAR, lastYear);
-  return Array.from({ length: lastYear - firstYear + 1 }, (_, index) => firstYear + index);
+function availableFiscalYears(years = [], anchor = null) {
+  const anchorYear = anchor == null ? null : Number(anchor);
+  return years.map(Number).filter(Number.isFinite)
+    .filter((year) => anchorYear == null || year <= anchorYear)
+    .sort((a, b) => a - b);
 }
 const pointChange = (value) => value == null ? "—" : (value > 0 ? "+" : "") + value.toFixed(1) + " pp";
 const outflowTone = (value) => value == null ? "text-text-secondary" : value <= 0 ? "text-positive" : "text-negative";
@@ -89,11 +87,13 @@ function HistorySection({ title, headers, rows, type }) {
 
 function makeHistoryRows(payload, metric, selectedMonths, maxDate) {
   const anchor = payload?.anchor;
-  if (anchor == null) return [];
-  const availableYears = new Set((payload?.years || []).map(Number));
-  const years = fiscalYearRange(payload?.years, anchor);
+  if (anchor == null || !Number.isFinite(Number(anchor))) return [];
+  const anchorYear = Number(anchor);
+  const years = availableFiscalYears(payload?.years, anchorYear).reverse();
+  const availableYears = new Set(years);
   const totals = payload?.totals || {};
-  const currentPartial = Boolean(payload?.current_fy_partial && anchor === payload?.current_fy);
+  const currentPartial = Boolean(payload?.current_fy_partial && anchorYear === Number(payload?.current_fy));
+  const previousYear = anchorYear - 1;
   const selectedMonthCount = selectedMonths.length > 0 && selectedMonths.length < 12 ? selectedMonths.length : 0;
   let elapsedMonths = 12;
   if (maxDate) {
@@ -104,47 +104,76 @@ function makeHistoryRows(payload, metric, selectedMonths, maxDate) {
   const isOutflow = metric === "discount_outflow";
   const isQty = metric === "qty";
   const isValue = metric === "val";
-  const read = (values) => {
-    const value = values?.[metric];
-    if (isOutflow) return value == null ? null : Number(value);
-    return Number(value) || 0;
+  const read = (values, key = metric) => {
+    const value = values?.[key];
+    if (value == null || !Number.isFinite(Number(value))) return null;
+    return Number(value);
   };
-  const apm = (value, divisor) => (isQty || isValue) && divisor ? value / divisor : value;
+  const apm = (value, divisor) => value == null ? null : (isQty || isValue) && divisor ? value / divisor : value;
   const fmt = (value) => {
     if (value == null) return "\u2014";
     if (isOutflow) return fmtPct(value);
     if (isQty) return fmtNumber(value);
     return fmtVal(value);
   };
+  const fullDivisor = selectedMonthCount || 12;
+  const partialDivisor = selectedMonthCount || elapsedMonths;
 
-  return years.map((year) => {
-    const values = totals[String(year)] || {};
-    const baseValues = totals[String(year - 1)] || {};
-    const isCurrentPartial = currentPartial && year === anchor;
-    const divisor = isCurrentPartial
-      ? (selectedMonthCount || elapsedMonths)
-      : (selectedMonthCount || 12);
-    const hasYearData = availableYears.has(year) && Object.hasOwn(totals, String(year));
-    const value = hasYearData ? apm(read(values), divisor) : null;
-    const hasPreviousYearData = availableYears.has(year - 1) && Object.hasOwn(totals, String(year - 1));
-    const currentBaseline = isCurrentPartial && selectedMonthCount === 0;
-    const baseRaw = !hasPreviousYearData
+  const createRow = ({ year, label, keySuffix, valueKey = metric, divisor, baseYear = year - 1, baseKey = metric, includeGrowth = true, current = false }) => {
+    const yearKey = String(year);
+    const values = totals[yearKey] || {};
+    const hasYearData = availableYears.has(year) && Object.hasOwn(totals, yearKey);
+    const rawValue = hasYearData ? read(values, valueKey) : null;
+    const value = apm(rawValue, divisor);
+    const baseYearKey = String(baseYear);
+    const baseValues = totals[baseYearKey] || {};
+    const hasBaseData = availableYears.has(baseYear) && Object.hasOwn(totals, baseYearKey);
+    const rawBase = includeGrowth && hasBaseData ? read(baseValues, baseKey) : null;
+    const base = apm(rawBase, divisor);
+    const change = !includeGrowth || value == null || base == null
       ? null
-      : currentBaseline
-        ? (values["lfytd_" + metric] == null ? null : Number(values["lfytd_" + metric]))
-        : read(baseValues);
-    const base = baseRaw == null ? null : apm(baseRaw, divisor);
-    const change = isOutflow
-      ? (value == null || base == null ? null : value - base)
-      : (value == null || base == null ? null : changePct(value, base));
+      : isOutflow ? value - base : changePct(value, base);
     return {
-      key: "fy-" + year,
-      label: fyLabel(year) + (isCurrentPartial ? " YTD" : ""),
+      key: "fy-" + year + "-" + keySuffix,
+      label,
       value,
       formatted: fmt(value),
       change,
-      current: isCurrentPartial,
+      current,
     };
+  };
+
+  return years.flatMap((year) => {
+    if (year === anchorYear) {
+      return [createRow({
+        year,
+        label: fyLabel(year),
+        keySuffix: "current",
+        divisor: currentPartial ? partialDivisor : fullDivisor,
+        baseYear: previousYear,
+        baseKey: currentPartial && selectedMonthCount === 0 ? "lfytd_" + metric : metric,
+        current: true,
+      })];
+    }
+
+    const fullRow = createRow({
+      year,
+      label: currentPartial && year === previousYear ? fyLabel(year) + " (Full)" : fyLabel(year),
+      keySuffix: "full",
+      divisor: fullDivisor,
+    });
+    if (currentPartial && year === previousYear) {
+      const lfytdRow = createRow({
+        year,
+        label: fyLabel(year) + " LFYTD",
+        keySuffix: "lfytd",
+        valueKey: "lfytd_" + metric,
+        divisor: partialDivisor,
+        includeGrowth: false,
+      });
+      return [lfytdRow, fullRow];
+    }
+    return [fullRow];
   });
 }
 export function MonthwiseHistoryKpis({ payload, selectedMonths = [], maxDate }) {
@@ -152,7 +181,7 @@ export function MonthwiseHistoryKpis({ payload, selectedMonths = [], maxDate }) 
   const valueRows = makeHistoryRows(payload, "val", selectedMonths, maxDate);
   const outflowRows = makeHistoryRows(payload, "discount_outflow", selectedMonths, maxDate);
   return <section className="overflow-hidden rounded-xl border border-border bg-surface">
-    <header className="border-b border-border px-4 py-3 sm:px-5"><h2 className="font-display text-base font-semibold text-text-primary">FY-wise KPI Summary</h2><p className="mt-1 text-xs text-text-muted">FY-wise monthly averages and discount outflow; current FY is year to date. Dashes mark FYs with no source data</p></header>
+    <header className="border-b border-border px-4 py-3 sm:px-5"><h2 className="font-display text-base font-semibold text-text-primary">FY-wise KPI Summary</h2><p className="mt-1 text-xs text-text-muted">FY-wise monthly averages and discount outflow; only fiscal years with source data are listed. The prior FY includes LFYTD and full-year values</p></header>
     <div className="grid gap-3 p-3 sm:p-4 xl:grid-cols-3">
       <HistorySection title="APM QTY" headers={["FY", "APM", "GROWTH VS PRIOR FY"]} rows={qtyRows} type="growth"/>
       <HistorySection title="APM VAL" headers={["FY", "APM", "GROWTH VS PRIOR FY"]} rows={valueRows} type="growth"/>
@@ -186,7 +215,7 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
   const [openSort, setOpenSort] = useState(null);
   const anchor = payload?.anchor;
   const currentPartial = Boolean(payload?.current_fy_partial && anchor === payload?.current_fy);
-  const years = fiscalYearRange(payload?.years, anchor);
+  const years = availableFiscalYears(payload?.years, anchor);
   const totals = payload?.totals || {};
   const allRows = payload?.rows || [];
   const dimensionInfo = DIMENSION_LABELS[dimension] || { title: dimension, column: dimension, search: dimension.toLowerCase() };
@@ -257,7 +286,7 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
           <tr>
             <th rowSpan="2" className="sticky left-0 z-40 min-w-[170px] border-b border-r border-border bg-base px-4 py-3 text-left">{header(dimensionInfo.column, "label", "left")}</th>
             {groups.map((group, index) => group.type === "year"
-              ? <th key={"year-" + group.year} colSpan={HISTORY_MEASURES.length} className={"border-b border-border px-3 py-2.5 text-center " + (group.year === years[0] ? "" : "border-l-2 border-border/70")}>{fyLabel(group.year)}{currentPartial && group.year === anchor ? " (CURRENT YTD)" : ""}</th>
+              ? <th key={"year-" + group.year} colSpan={HISTORY_MEASURES.length} className={"border-b border-border px-3 py-2.5 text-center " + (group.year === years[0] ? "" : "border-l-2 border-border/70")}>{fyLabel(group.year)}</th>
               : <th key={"growth-" + index} colSpan={growthMeasures.length} className="border-b border-l-2 border-accent/40 bg-accent-soft/40 px-3 py-2.5 text-center text-accent">GROWTH</th>)}
           </tr>
           <tr>{groups.flatMap((group) => group.type === "year"
