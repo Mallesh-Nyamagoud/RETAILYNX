@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Boxes, IndianRupee, Search, SlidersHorizontal } from "lucide-react";
+import { Boxes, ChevronDown, IndianRupee, Search, SlidersHorizontal } from "lucide-react";
 import { tertiaryApi } from "../api/client";
 
 const pages = [["brand", "Brands comparison"], ["store", "Brand-store performance"], ["department", "Department-wise performance"], ["state", "State-wise performance"], ["group", "Group-wise performance"]];
@@ -55,25 +55,76 @@ function HistoryTable({ title, metric, rows, total, growth, rangeLabel }) {
 
 function growthKey(metric) { return metric + "Growth"; }
 
+function SortControl({ label, descriptor, sortId, sorting, openSort, setOpenSort, onSort, className = "" }) {
+  const active = sorting?.id === sortId;
+  const open = openSort === sortId;
+  return <div className={"relative inline-flex items-center " + className}>
+    <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpenSort(open ? null : sortId)} className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-card-hover hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent">
+      <span>{label}</span><ChevronDown size={12} className={active ? "text-accent" : "text-text-muted"}/>{active && <span className="text-[9px] text-accent">{sorting.direction === "asc" ? "ASC" : "DESC"}</span>}
+    </button>
+    {open && <div role="menu" className="absolute left-0 top-full z-40 mt-1 min-w-48 rounded-lg border border-border bg-surface p-1 text-left normal-case shadow-xl">
+      <button type="button" role="menuitem" onClick={() => onSort(descriptor, sortId, "asc")} className="block w-full rounded px-3 py-2 text-left text-xs text-text-primary hover:bg-card-hover">{descriptor.type === "label" ? "Sort A to Z" : "Sort Smallest to Largest"}</button>
+      <button type="button" role="menuitem" onClick={() => onSort(descriptor, sortId, "desc")} className="block w-full rounded px-3 py-2 text-left text-xs text-text-primary hover:bg-card-hover">{descriptor.type === "label" ? "Sort Z to A" : "Sort Largest to Smallest"}</button>
+    </div>}
+  </div>;
+}
+
 function ComparisonTable({ dimension, rows, groups, totals, anchor, currentPartial, search, setSearch }) {
+  const [sorting, setSorting] = useState(null);
+  const [openSort, setOpenSort] = useState(null);
   const columnCount = 1 + groups.reduce((count, group) => count + group.cols.length, 0);
+  const onSort = (descriptor, id, direction) => { setSorting({ ...descriptor, id, direction }); setOpenSort(null); };
+  const sortValue = (row, descriptor) => {
+    if (descriptor.type === "label") return row.label;
+    if (descriptor.type === "year") return row.years[String(descriptor.year)]?.[descriptor.column] ?? 0;
+    const group = descriptor.group;
+    const current = row.years[String(group.year)]?.[descriptor.metric] || 0;
+    const baseRow = row.years[String(group.base)] || {};
+    const base = group.mode === "lfytd" ? baseRow["lfytd_" + descriptor.metric] : baseRow[descriptor.metric];
+    return pct(current, base || 0);
+  };
+  const sortedRows = sorting ? [...rows].sort((a, b) => {
+    const av = sortValue(a, sorting); const bv = sortValue(b, sorting);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const comparison = typeof av === "string" ? av.localeCompare(bv, undefined, { sensitivity: "base", numeric: true }) : Number(av) - Number(bv);
+    return sorting.direction === "asc" ? comparison : -comparison;
+  }) : rows;
+  const control = (label, descriptor, id, extra = "") => <SortControl label={label} descriptor={descriptor} sortId={id} sorting={sorting} openSort={openSort} setOpenSort={setOpenSort} onSort={onSort} className={extra}/>;
+  const renderCells = (row) => groups.flatMap((group, groupIndex) => {
+    if (group.type === "year") return group.cols.map((column) => {
+      const value = row.years[String(group.year)]?.[column] || 0;
+      const denominator = totals[String(group.year)]?.[column] || 0;
+      const share = denominator > 0 ? (value / denominator) * 100 : null;
+      return <td key={groupIndex + "-" + column} className="border-b border-border px-3 py-2 tabular-nums text-text-primary"><span>{column.includes("val") ? "\u20B9" : ""}{fmt.format(value)}</span><span className="ml-1 whitespace-nowrap text-text-muted">{share == null ? "" : "| " + share.toFixed(1) + "%"}</span></td>;
+    });
+    return ["qty", "val"].map((metric) => {
+      const baseRow = row.years[String(group.base)] || {};
+      const base = group.mode === "lfytd" ? baseRow["lfytd_" + metric] : baseRow[metric];
+      const value = pct(row.years[String(group.year)]?.[metric] || 0, base || 0);
+      return <td key={groupIndex + "-" + metric} className="border-b border-border px-3 py-2"><GrowthValue value={value}/></td>;
+    });
+  });
+
+
   return <section className="overflow-hidden rounded-xl border border-border bg-surface">
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4"><div><h2 className="font-display font-semibold text-text-primary">{dimension} comparison</h2><p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString("en-IN")} rows | fiscal years in chronological order</p></div><div className="relative"><Search size={15} className="absolute left-3 top-2.5 text-text-muted"/><input aria-label="Search comparison rows" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={"Search " + dimension.toLowerCase() + " rows"} className="rounded-lg border border-border bg-base py-2 pl-9 pr-3 text-sm text-text-primary"/></div></header>
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4"><div><h2 className="font-display font-semibold text-text-primary">{dimension} comparison</h2><p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString("en-IN")} rows | fiscal years in chronological order{sorting ? " | sorted " + (sorting.direction === "asc" ? "ascending" : "descending") : ""}</p></div><div className="relative"><Search size={15} className="absolute left-3 top-2.5 text-text-muted"/><input aria-label="Search comparison rows" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={"Search " + dimension.toLowerCase() + " rows"} className="rounded-lg border border-border bg-base py-2 pl-9 pr-3 text-sm text-text-primary"/></div></header>
     <div className="max-h-[62vh] overflow-auto"><table className="w-full min-w-max border-separate border-spacing-0 text-right text-xs">
       <thead className="sticky top-0 z-10 bg-base text-text-secondary">
-        <tr><th rowSpan="3" className="sticky left-0 z-20 min-w-48 border-b border-r border-border bg-base px-4 py-3 text-left uppercase">{dimension}</th>{groups.map((group, index) => <th key={index} colSpan={group.cols.length} className="border-b border-border px-3 py-2 text-center">{group.type === "year" ? fyName(group.year) + (currentPartial && group.year === anchor ? " (CURRENT YTD)" : "") : "GROWTH"}</th>)}</tr>
-        <tr>{groups.flatMap((group, index) => group.type === "growth" ? [<th key={index + "gq"} rowSpan="2" className="border-b border-border px-3 py-2">QTY</th>, <th key={index + "gv"} rowSpan="2" className="border-b border-border px-3 py-2">VAL</th>] : group.cols.length === 4 ? [<th key={index + "q"} colSpan="2" className="border-b border-border px-3 py-2">QTY</th>, <th key={index + "v"} colSpan="2" className="border-b border-border px-3 py-2">VAL</th>] : [<th key={index + "q"} rowSpan="2" className="border-b border-border px-3 py-2">QTY</th>, <th key={index + "v"} rowSpan="2" className="border-b border-border px-3 py-2">VAL</th>])}</tr>
-        <tr>{groups.flatMap((group, index) => group.type === "year" && group.cols.length === 4 ? [<th key={index + "qf"} className="border-b border-border px-3 py-2">FY FULL</th>, <th key={index + "ql"} className="border-b border-border px-3 py-2">LFYTD</th>, <th key={index + "vf"} className="border-b border-border px-3 py-2">FY FULL</th>, <th key={index + "vl"} className="border-b border-border px-3 py-2">LFYTD</th>] : [])}</tr>
+        <tr><th rowSpan="3" className="sticky left-0 z-20 min-w-48 border-b border-r border-border bg-base px-4 py-3 text-left uppercase">{control(dimension, { type: "label" }, "label")}</th>{groups.map((group, index) => <th key={index} colSpan={group.cols.length} className="border-b border-border px-3 py-2 text-center">{group.type === "year" ? fyName(group.year) + (currentPartial && group.year === anchor ? " (CURRENT YTD)" : "") : "GROWTH"}</th>)}</tr>
+        <tr>{groups.flatMap((group, index) => {
+          if (group.type === "growth") return [<th key={index + "gq"} rowSpan="2" className="border-b border-border px-3 py-2">{control("QTY", { type: "growth", group, metric: "qty" }, index + "-growth-qty")}</th>, <th key={index + "gv"} rowSpan="2" className="border-b border-border px-3 py-2">{control("VAL", { type: "growth", group, metric: "val" }, index + "-growth-val")}</th>];
+          if (group.cols.length === 4) return [<th key={index + "q"} colSpan="2" className="border-b border-border px-3 py-2">QTY</th>, <th key={index + "v"} colSpan="2" className="border-b border-border px-3 py-2">VAL</th>];
+          return [<th key={index + "q"} rowSpan="2" className="border-b border-border px-3 py-2">{control("QTY", { type: "year", year: group.year, column: group.cols[0] }, index + "-" + group.cols[0])}</th>, <th key={index + "v"} rowSpan="2" className="border-b border-border px-3 py-2">{control("VAL", { type: "year", year: group.year, column: group.cols[1] }, index + "-" + group.cols[1])}</th>];
+        })}</tr>
+        <tr>{groups.flatMap((group, index) => group.type === "year" && group.cols.length === 4 ? [<th key={index + "qf"} className="border-b border-border px-3 py-2">{control("FY FULL", { type: "year", year: group.year, column: "qty" }, index + "-qty")}</th>, <th key={index + "ql"} className="border-b border-border px-3 py-2">{control("LFYTD", { type: "year", year: group.year, column: "lfytd_qty" }, index + "-lfytd_qty")}</th>, <th key={index + "vf"} className="border-b border-border px-3 py-2">{control("FY FULL", { type: "year", year: group.year, column: "val" }, index + "-val")}</th>, <th key={index + "vl"} className="border-b border-border px-3 py-2">{control("LFYTD", { type: "year", year: group.year, column: "lfytd_val" }, index + "-lfytd_val")}</th>] : [])}</tr>
       </thead>
-      <tbody>{rows.length ? rows.map((row) => <tr key={row.label} className="h-[38px] odd:bg-surface even:bg-base/60 hover:bg-accent-soft/50">
-        <th className="sticky left-0 border-b border-r border-border bg-inherit px-4 py-2 text-left font-medium text-text-primary">{row.label}</th>
-        {groups.flatMap((group, groupIndex) => group.type === "year" ? group.cols.map((column) => { const value = row.years[String(group.year)]?.[column] || 0; const denominator = totals[String(group.year)]?.[column] || 0; const share = denominator > 0 ? (value / denominator) * 100 : null; return <td key={groupIndex + "-" + column} className="border-b border-border px-3 py-2 tabular-nums text-text-primary"><span>{column.includes("val") && <span>&#8377;</span>}{fmt.format(value)}</span>{share != null && <span className="ml-1 whitespace-nowrap text-text-muted">| {share.toFixed(1)}%</span>}</td>; }) : ["qty", "val"].map((metric) => { const baseRow = row.years[String(group.base)] || {}; const base = group.mode === "lfytd" ? baseRow["lfytd_" + metric] : baseRow[metric]; const value = pct(row.years[String(group.year)]?.[metric] || 0, base || 0); return <td key={groupIndex + "-" + metric} className="border-b border-border px-3 py-2"><GrowthValue value={value}/></td>; }))}
-      </tr>) : <tr><td colSpan={columnCount} className="px-4 py-8 text-center text-sm text-text-muted">No comparison rows match these filters.</td></tr>}</tbody>
+      <tbody>{sortedRows.length ? sortedRows.map((row) => <tr key={row.label} className="h-[38px] odd:bg-surface even:bg-base/60 hover:bg-accent-soft/50"><th className="sticky left-0 border-b border-r border-border bg-inherit px-4 py-2 text-left font-medium text-text-primary">{row.label}</th>{renderCells(row)}</tr>) : <tr><td colSpan={columnCount} className="px-4 py-8 text-center text-sm text-text-muted">No comparison rows match these filters.</td></tr>}</tbody>
       <tfoot><tr className="border-t-2 border-accent bg-surface font-bold text-text-primary"><th className="border-t-2 border-accent px-4 py-3 text-left">Grand Total</th>{groups.flatMap((group, groupIndex) => group.type === "year" ? group.cols.map((column) => { const value = totals[String(group.year)]?.[column] || 0; return <td key={groupIndex + "-" + column} className="border-t-2 border-accent px-3 py-3 tabular-nums"><span>{column.includes("val") && <span>&#8377;</span>}{fmt.format(value)}</span>{value > 0 && <span className="ml-1 whitespace-nowrap text-text-muted">| 100.0%</span>}</td>; }) : ["qty", "val"].map((metric) => { const baseRow = totals[String(group.base)] || {}; const base = group.mode === "lfytd" ? baseRow["lfytd_" + metric] : baseRow[metric]; const value = pct(totals[String(group.year)]?.[metric] || 0, base || 0); return <td key={groupIndex + "-" + metric} className="border-t-2 border-accent px-3 py-3"><GrowthValue value={value}/></td>; }))}</tr></tfoot>
     </table></div>
   </section>;
 }
-
 
 export default function TertiarySummary() {
   const [config, setConfig] = useState(null);
