@@ -168,7 +168,7 @@ const DIMENSION_LABELS = {
   state: { title: "Statewise Analysis", column: "STATE", search: "state" },
 };
 
-export function MonthwiseDimensionTable({ payload, dimension, search, setSearch, selectedMonths = [] }) {
+export function MonthwiseDimensionTable({ payload, dimension, search, setSearch, selectedMonths = [], embedded = false }) {
   const [sorting, setSorting] = useState(null);
   const [openSort, setOpenSort] = useState(null);
   const anchor = payload?.anchor;
@@ -219,7 +219,7 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
   const changeSort = (id, direction) => { setSorting({ id, direction }); setOpenSort(null); };
   const header = (label, id, align = "right") => <SortHeader label={label} id={id} sorting={sorting} open={openSort === id} onToggle={() => setOpenSort((current) => current === id ? null : id)} onSort={changeSort} align={align}/>;
   const renderValue = (value, metric) => value == null
-    ? <span className="text-text-muted">?</span>
+    ? <span className="text-text-muted">—</span>
     : <span className="whitespace-nowrap">{metric.format(value)}</span>;
   const renderGrowth = (value, metric) => {
     if (value == null) return <span className="text-text-muted">—</span>;
@@ -232,7 +232,7 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
     ["DISCOUNT OUTFLOW P.P", HISTORY_MEASURES[3]],
   ];
 
-  return <section className="overflow-hidden rounded-xl border border-border bg-surface">
+  return <section className={embedded ? "overflow-hidden" : "overflow-hidden rounded-xl border border-border bg-surface"}>
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
       <div><h2 className="font-display font-semibold text-text-primary">{dimensionInfo.title}</h2><p className="mt-1 text-xs text-text-muted">{allRows.length.toLocaleString("en-IN")} rows | fiscal years in chronological order</p></div>
       <div><label className="sr-only" htmlFor="monthwise-dimension-search">Search {dimensionInfo.search} rows</label><input id="monthwise-dimension-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={"Search " + dimensionInfo.search + " rows"} className="w-56 rounded-lg border border-border bg-base px-3 py-2 text-sm text-text-primary"/></div>
@@ -243,23 +243,23 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
           <tr>
             <th rowSpan="2" className="sticky left-0 z-40 min-w-[170px] border-b border-r border-border bg-base px-4 py-3 text-left">{header(dimensionInfo.column, "label", "left")}</th>
             {groups.map((group, index) => group.type === "year"
-              ? <th key={"year-" + group.year} colSpan={HISTORY_MEASURES.length} className="border-b border-border px-3 py-2.5 text-center">{fyLabel(group.year)}{currentPartial && group.year === anchor ? " (CURRENT YTD)" : ""}</th>
+              ? <th key={"year-" + group.year} colSpan={HISTORY_MEASURES.length} className={"border-b border-border px-3 py-2.5 text-center " + (group.year === years[0] ? "" : "border-l-2 border-border/70")}>{fyLabel(group.year)}{currentPartial && group.year === anchor ? " (CURRENT YTD)" : ""}</th>
               : <th key={"growth-" + index} colSpan={growthMeasures.length} className="border-b border-l-2 border-accent/40 bg-accent-soft/40 px-3 py-2.5 text-center text-accent">GROWTH</th>)}
           </tr>
           <tr>{groups.flatMap((group) => group.type === "year"
-            ? HISTORY_MEASURES.map((metric) => <th key={group.year + "-" + metric.key} className="border-b border-border px-3 py-2 text-right">{header(metric.label, valueId(group.year, metric.key))}</th>)
+            ? HISTORY_MEASURES.map((metric) => <th key={group.year + "-" + metric.key} className={"border-b border-border px-3 py-2 text-right " + (group.year === years[0] ? "" : metric === HISTORY_MEASURES[0] ? "border-l-2 border-border/70" : "")}>{header(metric.label, valueId(group.year, metric.key))}</th>)
             : growthMeasures.map(([label, metric]) => <th key={group.year + "-" + metric.key} className="border-b border-l border-accent/20 bg-accent-soft/30 px-3 py-2 text-right">{header(label, changeId(group.year, metric.key))}</th>))}</tr>
         </thead>
         <tbody>{displayedRows.length ? displayedRows.map((row, index) => <tr key={row.label} className={"hover:bg-accent-soft/30 " + (index % 2 ? "bg-base/40" : "bg-surface")}>
           <th scope="row" className="sticky left-0 z-20 border-b border-r border-border bg-surface px-4 py-2.5 text-left font-semibold text-text-primary">{row.label}</th>
           {groups.flatMap((group) => group.type === "year"
-            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary">{renderValue(valueAt(row, group.year, metric), metric)}</td>)
+            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className={"whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary " + (group.year !== years[0] && metric === HISTORY_MEASURES[0] ? "border-l-2 border-border/70" : "")}>{renderValue(valueAt(row, group.year, metric), metric)}</td>)
             : growthMeasures.map(([, metric]) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-b border-l border-accent/20 px-3 py-2.5 text-right tabular-nums">{renderGrowth(growthAt(row, group.year, metric), metric)}</td>))}
-        </tr>) : <tr><td colSpan={1 + groups.reduce((sum, group) => sum + (group.type === "year" ? HISTORY_MEASURES.length : growthMeasures.length), 0)} className="px-4 py-10 text-center text-sm text-text-muted">No rows match these filters.</td></tr>}</tbody>
+        </tr>) : <tr><td colSpan={1 + groups.reduce((sum, group) => sum + (group.type === "year" ? HISTORY_MEASURES.length : group.type === "gap" ? 1 : growthMeasures.length), 0)} className="px-4 py-10 text-center text-sm text-text-muted">No rows match these filters.</td></tr>}</tbody>
         {years.length > 0 && <tfoot><tr className="bg-surface font-bold text-text-primary">
           <th scope="row" className="sticky left-0 z-20 border-t-2 border-r border-accent bg-surface px-4 py-3 text-left">Grand Total</th>
           {groups.flatMap((group) => group.type === "year"
-            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-t-2 border-accent px-3 py-3 text-right tabular-nums">{renderValue(totalAt(group.year, metric), metric)}</td>)
+            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className={"whitespace-nowrap border-t-2 border-accent px-3 py-3 text-right tabular-nums " + (group.year !== years[0] && metric === HISTORY_MEASURES[0] ? "border-l-2 border-border/70" : "")}>{renderValue(totalAt(group.year, metric), metric)}</td>)
             : growthMeasures.map(([, metric]) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-t-2 border-l border-accent/20 px-3 py-3 text-right tabular-nums">{renderGrowth(totalGrowthAt(group.year, metric), metric)}</td>))}
         </tr></tfoot>}
       </table>
