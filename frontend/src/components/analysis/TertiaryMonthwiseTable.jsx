@@ -57,12 +57,14 @@ export function summarizeMonthwise(rows = []) {
   };
 }
 
+
 function HistorySection({ title, headers, rows, type }) {
   return <article className="min-w-0 overflow-hidden rounded-xl border border-border bg-base/40">
     <h3 className="border-b border-border px-4 py-3 text-xs font-bold uppercase tracking-[.12em] text-text-secondary">{title}</h3>
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[380px] border-separate border-spacing-0 text-left text-xs">
-        <thead className="bg-base text-[10px] font-semibold uppercase tracking-wide text-text-secondary"><tr>{headers.map((header) => <th key={header} className="px-3 py-2.5">{header}</th>)}</tr></thead>
+      <table className="w-full min-w-[460px] table-fixed border-separate border-spacing-0 text-xs">
+        <colgroup><col style={{ width: "34%" }}/><col style={{ width: "26%" }}/><col style={{ width: "40%" }}/></colgroup>
+        <thead className="bg-base text-[10px] font-semibold uppercase tracking-wide text-text-secondary"><tr>{headers.map((header, index) => <th key={header} className={"px-3 py-2.5 " + (index === 0 ? "text-left" : "text-right")}>{header}</th>)}</tr></thead>
         <tbody>{rows.length ? rows.map((row) => {
           const discount = type === "outflow";
           const change = row.change;
@@ -80,86 +82,56 @@ function HistorySection({ title, headers, rows, type }) {
 function makeHistoryRows(payload, metric, selectedMonths, maxDate) {
   const anchor = payload?.anchor;
   if (anchor == null) return [];
-  const years = (payload?.years || []).filter((year) => year <= anchor).sort((a, b) => b - a);
+  const years = (payload?.years || []).filter((year) => year <= anchor).sort((a, b) => a - b);
   const totals = payload?.totals || {};
   const currentPartial = Boolean(payload?.current_fy_partial && anchor === payload?.current_fy);
-  const previousYear = anchor - 1;
-  const current = totals[String(anchor)] || {};
-  const previous = totals[String(previousYear)] || {};
   const selectedMonthCount = selectedMonths.length > 0 && selectedMonths.length < 12 ? selectedMonths.length : 0;
-  let elapsedMonths = selectedMonthCount;
-  if (!elapsedMonths && maxDate) {
+  let elapsedMonths = 12;
+  if (maxDate) {
     const month = new Date(maxDate).getUTCMonth() + 1;
     elapsedMonths = month >= 4 ? month - 3 : month + 9;
   }
-  elapsedMonths = elapsedMonths || 12;
 
   const isOutflow = metric === "discount_outflow";
   const isQty = metric === "qty";
   const isValue = metric === "val";
-  const read = (values, prefix = "") => {
-    const value = values[prefix + metric];
+  const read = (values) => {
+    const value = values?.[metric];
     if (isOutflow) return value == null ? null : Number(value);
     return Number(value) || 0;
   };
+  const apm = (value, divisor) => (isQty || isValue) && divisor ? value / divisor : value;
   const fmt = (value) => {
     if (value == null) return "—";
     if (isOutflow) return fmtPct(value);
     if (isQty) return fmtNumber(value);
-    if (isValue) return fmtVal(value);
     return fmtVal(value);
   };
-  const apm = (value, divisor) => (isQty || isValue) && divisor ? value / divisor : value;
-  const currentBase = currentPartial
-    ? (selectedMonthCount ? read(previous) : read(previous, "lfytd_"))
-    : read(previous);
-  const averageMonths = selectedMonthCount || 12;
-  const currentDivisor = currentPartial ? elapsedMonths : averageMonths;
-  const currentValue = apm(read(current), currentDivisor);
-  const comparisonValue = apm(currentBase, currentDivisor);
-  const currentChange = isOutflow
-    ? (currentValue == null || comparisonValue == null ? null : currentValue - comparisonValue)
-    : changePct(currentValue, comparisonValue);
 
-  const rows = [{
-    key: "current-" + anchor,
-    label: fyLabel(anchor),
-    current: true,
-    value: currentValue,
-    formatted: fmt(currentValue),
-    change: currentChange,
-  }];
-
-  if (currentPartial && totals[String(previousYear)]) {
-    const previousValue = selectedMonthCount ? read(previous) : read(previous, "lfytd_");
-    const adjustedPrevious = apm(previousValue, elapsedMonths);
-    rows.push({
-      key: "lfytd-" + previousYear,
-      label: fyLabel(previousYear) + (selectedMonthCount ? " selected months" : " LFYTD"),
-      value: adjustedPrevious,
-      formatted: fmt(adjustedPrevious),
-      change: null,
-    });
-  }
-
-  years.filter((year) => year < anchor).forEach((year) => {
+  return years.map((year) => {
     const values = totals[String(year)] || {};
     const baseValues = totals[String(year - 1)] || {};
-    const averageMonths = selectedMonthCount || 12;
-    const value = apm(read(values), averageMonths);
-    const base = apm(read(baseValues), averageMonths);
+    const isCurrentPartial = currentPartial && year === anchor;
+    const divisor = isCurrentPartial
+      ? (selectedMonthCount || elapsedMonths)
+      : (selectedMonthCount || 12);
+    const value = apm(read(values), divisor);
+    const baseRaw = isCurrentPartial && selectedMonthCount === 0
+      ? (values[`lfytd_${metric}`] == null ? null : Number(values[`lfytd_${metric}`]))
+      : read(baseValues);
+    const base = baseRaw == null ? null : apm(baseRaw, divisor);
     const change = isOutflow
-      ? (value == null || read(baseValues) == null ? null : value - read(baseValues))
+      ? (value == null || base == null ? null : value - base)
       : changePct(value, base);
-    rows.push({
-      key: "full-" + year,
-      label: fyLabel(year) + (currentPartial && year === previousYear ? " FULL" : ""),
+    return {
+      key: "fy-" + year,
+      label: fyLabel(year) + (isCurrentPartial ? " YTD" : ""),
       value,
       formatted: fmt(value),
       change,
-    });
+      current: isCurrentPartial,
+    };
   });
-  return rows;
 }
 
 export function MonthwiseHistoryKpis({ payload, selectedMonths = [], maxDate }) {
@@ -167,11 +139,11 @@ export function MonthwiseHistoryKpis({ payload, selectedMonths = [], maxDate }) 
   const valueRows = makeHistoryRows(payload, "val", selectedMonths, maxDate);
   const outflowRows = makeHistoryRows(payload, "discount_outflow", selectedMonths, maxDate);
   return <section className="overflow-hidden rounded-xl border border-border bg-surface">
-    <header className="border-b border-border px-4 py-3 sm:px-5"><h2 className="font-display text-base font-semibold text-text-primary">Historical KPIs</h2><p className="mt-1 text-xs text-text-muted">Monthly averages and discount outflow for the selected filters</p></header>
+    <header className="border-b border-border px-4 py-3 sm:px-5"><h2 className="font-display text-base font-semibold text-text-primary">FY-wise KPI Summary</h2><p className="mt-1 text-xs text-text-muted">FY-wise monthly averages and discount outflow; current FY values are year to date</p></header>
     <div className="grid gap-3 p-3 sm:p-4 xl:grid-cols-3">
-      <HistorySection title="APM QTY" headers={["FY", "APM", "GROWTH%"]} rows={qtyRows} type="growth"/>
-      <HistorySection title="APM VAL" headers={["FY", "APM", "GROWTH%"]} rows={valueRows} type="growth"/>
-      <HistorySection title="DISCOUNT OUTFLOW" headers={["FY", "DISCOUNT%", "P.P CHANGE"]} rows={outflowRows} type="outflow"/>
+      <HistorySection title="APM QTY" headers={["FY", "APM", "GROWTH VS PRIOR FY"]} rows={qtyRows} type="growth"/>
+      <HistorySection title="APM VAL" headers={["FY", "APM", "GROWTH VS PRIOR FY"]} rows={valueRows} type="growth"/>
+      <HistorySection title="DISCOUNT OUTFLOW" headers={["FY", "DISCOUNT OUTFLOW %", "P.P CHANGE VS PRIOR FY"]} rows={outflowRows} type="outflow"/>
     </div>
   </section>;
 }
@@ -188,7 +160,15 @@ function sortedRows(rows, sorting, getValue) {
   });
 }
 
-export function MonthwiseDimensionTable({ payload, dimension, search, setSearch }) {
+
+const DIMENSION_LABELS = {
+  brand: { title: "Brandwise Analysis", column: "BRAND", search: "brand" },
+  store: { title: "Storewise Analysis", column: "STORE", search: "store" },
+  department: { title: "Departmentwise Analysis", column: "DEPARTMENT", search: "department" },
+  state: { title: "Statewise Analysis", column: "STATE", search: "state" },
+};
+
+export function MonthwiseDimensionTable({ payload, dimension, search, setSearch, selectedMonths = [] }) {
   const [sorting, setSorting] = useState(null);
   const [openSort, setOpenSort] = useState(null);
   const anchor = payload?.anchor;
@@ -196,32 +176,27 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch 
   const years = (payload?.years || []).filter((year) => anchor == null || year <= anchor).sort((a, b) => a - b);
   const totals = payload?.totals || {};
   const allRows = payload?.rows || [];
+  const dimensionInfo = DIMENSION_LABELS[dimension] || { title: dimension, column: dimension, search: dimension.toLowerCase() };
   const rows = allRows.filter((row) => String(row.label).toLowerCase().includes(search.toLowerCase()));
+  const selectedMonthCount = selectedMonths.length > 0 && selectedMonths.length < 12 ? selectedMonths.length : 0;
   const changeId = (year, key) => "growth-" + year + "-" + key;
-  const valueId = (year, mode, key) => "year-" + year + "-" + mode + "-" + key;
+  const valueId = (year, key) => "year-" + year + "-" + key;
 
-  const valueAt = (record, year, mode, metric) => {
-    const values = record?.years?.[String(year)] || {};
-    if (metric.key === "discount_outflow") return values[(mode === "lfytd" ? "lfytd_" : "") + "discount_outflow"];
-    return values[(mode === "lfytd" ? "lfytd_" : "") + metric.key];
-  };
-  const totalAt = (year, mode, metric) => valueAt({ years: totals }, year, mode, metric);
+  const valueAt = (record, year, metric) => record?.years?.[String(year)]?.[metric.key];
+  const totalAt = (year, metric) => valueAt({ years: totals }, year, metric);
   const growthAt = (record, year, metric) => {
     const values = record?.years?.[String(year)] || {};
-    const baseMode = currentPartial && year === anchor ? "lfytd_" : "";
-    const current = valueAt(record, year, "", metric);
-    const previous = valueAt(record, year - 1, baseMode, metric);
+    const base = record?.years?.[String(year - 1)] || {};
+    const useYtdBase = currentPartial && year === anchor && selectedMonthCount === 0;
+    const current = values[metric.key];
+    const previous = base[(useYtdBase ? "lfytd_" : "") + metric.key];
     if (metric.key === "discount_outflow") return current == null || previous == null ? null : current - previous;
     return changePct(current, previous);
   };
   const totalGrowthAt = (year, metric) => growthAt({ years: totals }, year, metric);
 
   const groups = years.flatMap((year, index) => {
-    const yearGroup = {
-      type: "year",
-      year,
-      modes: currentPartial && year === anchor - 1 ? ["full", "lfytd"] : ["full"],
-    };
+    const yearGroup = { type: "year", year };
     if (index === 0) return [yearGroup];
     return [yearGroup, { type: "growth", year }];
   });
@@ -229,57 +204,63 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch 
   const getSortValue = (record, id) => {
     if (id === "label") return record.label;
     const parts = id.split("-");
-    if (parts[0] === "year") return valueAt(record, Number(parts[1]), parts[2], HISTORY_MEASURES.find((metric) => metric.key === parts.slice(3).join("-")) || HISTORY_MEASURES[0]);
+    if (parts[0] === "year") {
+      const metric = HISTORY_MEASURES.find((item) => item.key === parts.slice(2).join("-")) || HISTORY_MEASURES[0];
+      return valueAt(record, Number(parts[1]), metric);
+    }
     if (parts[0] === "growth") {
       const metric = HISTORY_MEASURES.find((item) => item.key === parts.slice(2).join("-")) || HISTORY_MEASURES[0];
       return growthAt(record, Number(parts[1]), metric);
     }
     return null;
   };
-  const displayedRows = useMemo(() => sortedRows(rows, sorting, getSortValue), [rows, sorting, anchor, currentPartial]);
+  const displayedRows = useMemo(() => sortedRows(rows, sorting, getSortValue), [rows, sorting, anchor, currentPartial, selectedMonthCount]);
 
   const changeSort = (id, direction) => { setSorting({ id, direction }); setOpenSort(null); };
   const header = (label, id, align = "right") => <SortHeader label={label} id={id} sorting={sorting} open={openSort === id} onToggle={() => setOpenSort((current) => current === id ? null : id)} onSort={changeSort} align={align}/>;
-  const renderValue = (value, metric) => {
-    if (value == null) return <span className="text-text-muted">—</span>;
-    return <span className="whitespace-nowrap">{metric.format(value)}</span>;
-  };
+  const renderValue = (value, metric) => value == null
+    ? <span className="text-text-muted">?</span>
+    : <span className="whitespace-nowrap">{metric.format(value)}</span>;
   const renderGrowth = (value, metric) => {
     if (value == null) return <span className="text-text-muted">—</span>;
     if (metric.key === "discount_outflow") return <span className={outflowTone(value)}>{pointChange(value)}</span>;
     return <span className={growthTone(value)}>{(value > 0 ? "+" : "") + value.toFixed(1) + "%"}</span>;
   };
+  const growthMeasures = [
+    ["QTY GROWTH %", HISTORY_MEASURES[0]],
+    ["VALUE GROWTH %", HISTORY_MEASURES[4]],
+    ["DISCOUNT OUTFLOW P.P", HISTORY_MEASURES[3]],
+  ];
 
   return <section className="overflow-hidden rounded-xl border border-border bg-surface">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
-      <div><h2 className="font-display font-semibold text-text-primary">{dimension} analysis</h2><p className="mt-1 text-xs text-text-muted">{allRows.length.toLocaleString("en-IN")} rows | fiscal years in chronological order</p></div>
-      <div><label className="sr-only" htmlFor="monthwise-dimension-search">Search {dimension.toLowerCase()} rows</label><input id="monthwise-dimension-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={"Search " + dimension.toLowerCase() + " rows"} className="rounded-lg border border-border bg-base px-3 py-2 text-sm text-text-primary"/></div>
+      <div><h2 className="font-display font-semibold text-text-primary">{dimensionInfo.title}</h2><p className="mt-1 text-xs text-text-muted">{allRows.length.toLocaleString("en-IN")} rows | fiscal years in chronological order</p></div>
+      <div><label className="sr-only" htmlFor="monthwise-dimension-search">Search {dimensionInfo.search} rows</label><input id="monthwise-dimension-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={"Search " + dimensionInfo.search + " rows"} className="w-56 rounded-lg border border-border bg-base px-3 py-2 text-sm text-text-primary"/></div>
     </header>
     <div className="overflow-auto">
       <table className="w-full min-w-max border-separate border-spacing-0 text-right text-xs">
         <thead className="sticky top-0 z-30 bg-base text-[10px] font-bold uppercase tracking-wide text-text-secondary">
           <tr>
-            <th rowSpan="3" className="sticky left-0 z-40 min-w-[170px] border-b border-r border-border bg-base px-4 py-3 text-left">{header(dimension, "label", "left")}</th>
+            <th rowSpan="2" className="sticky left-0 z-40 min-w-[170px] border-b border-r border-border bg-base px-4 py-3 text-left">{header(dimensionInfo.column, "label", "left")}</th>
             {groups.map((group, index) => group.type === "year"
-              ? <th key={"year-" + group.year} colSpan={group.modes.length * HISTORY_MEASURES.length} className="border-b border-border px-3 py-2.5 text-center">{fyLabel(group.year)}{currentPartial && group.year === anchor ? " (CURRENT YTD)" : ""}</th>
-              : <th key={"growth-" + index} colSpan="3" rowSpan="3" className="border-b border-l-2 border-accent/40 bg-accent-soft/40 px-3 py-2.5 text-center text-accent">GROWTH</th>)}
+              ? <th key={"year-" + group.year} colSpan={HISTORY_MEASURES.length} className="border-b border-border px-3 py-2.5 text-center">{fyLabel(group.year)}{currentPartial && group.year === anchor ? " (CURRENT YTD)" : ""}</th>
+              : <th key={"growth-" + index} colSpan={growthMeasures.length} className="border-b border-l-2 border-accent/40 bg-accent-soft/40 px-3 py-2.5 text-center text-accent">GROWTH</th>)}
           </tr>
-          <tr>{groups.filter((group) => group.type === "year").flatMap((group) => group.modes.map((mode) => <th key={group.year + "-" + mode} colSpan={HISTORY_MEASURES.length} className="border-b border-border px-3 py-2 text-center">{mode === "lfytd" ? "LFYTD" : currentPartial && group.year === anchor ? "YEAR TO DATE" : "FY FULL"}</th>))}</tr>
           <tr>{groups.flatMap((group) => group.type === "year"
-            ? group.modes.flatMap((mode) => HISTORY_MEASURES.map((metric) => <th key={group.year + "-" + mode + "-" + metric.key} className="border-b border-border px-3 py-2 text-right">{header(metric.label, valueId(group.year, mode, metric.key))}</th>))
-            : [["QTY GROWTH %", "qty"], ["VALUE GROWTH %", "val"], ["DISCOUNT OUTFLOW P.P", "discount_outflow"]].map(([label, key]) => <th key={group.year + "-" + key} rowSpan="1" className="border-b border-l border-accent/20 bg-accent-soft/30 px-3 py-2 text-right">{header(label, changeId(group.year, key))}</th>))}</tr>
+            ? HISTORY_MEASURES.map((metric) => <th key={group.year + "-" + metric.key} className="border-b border-border px-3 py-2 text-right">{header(metric.label, valueId(group.year, metric.key))}</th>)
+            : growthMeasures.map(([label, metric]) => <th key={group.year + "-" + metric.key} className="border-b border-l border-accent/20 bg-accent-soft/30 px-3 py-2 text-right">{header(label, changeId(group.year, metric.key))}</th>))}</tr>
         </thead>
         <tbody>{displayedRows.length ? displayedRows.map((row, index) => <tr key={row.label} className={"hover:bg-accent-soft/30 " + (index % 2 ? "bg-base/40" : "bg-surface")}>
           <th scope="row" className="sticky left-0 z-20 border-b border-r border-border bg-surface px-4 py-2.5 text-left font-semibold text-text-primary">{row.label}</th>
           {groups.flatMap((group) => group.type === "year"
-            ? group.modes.flatMap((mode) => HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + mode + "-" + metric.key} className="whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary">{renderValue(valueAt(row, group.year, mode, metric), metric)}</td>))
-            : [["qty", HISTORY_MEASURES[0]], ["val", HISTORY_MEASURES[4]], ["discount_outflow", HISTORY_MEASURES[3]]].map(([key, metric]) => <td key={group.year + "-" + key} className="whitespace-nowrap border-b border-l border-accent/20 px-3 py-2.5 text-right tabular-nums">{renderGrowth(growthAt(row, group.year, metric), metric)}</td>))}
-        </tr>) : <tr><td colSpan={1 + groups.reduce((sum, group) => sum + (group.type === "year" ? group.modes.length * HISTORY_MEASURES.length : 3), 0)} className="px-4 py-10 text-center text-sm text-text-muted">No rows match these filters.</td></tr>}</tbody>
+            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary">{renderValue(valueAt(row, group.year, metric), metric)}</td>)
+            : growthMeasures.map(([, metric]) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-b border-l border-accent/20 px-3 py-2.5 text-right tabular-nums">{renderGrowth(growthAt(row, group.year, metric), metric)}</td>))}
+        </tr>) : <tr><td colSpan={1 + groups.reduce((sum, group) => sum + (group.type === "year" ? HISTORY_MEASURES.length : growthMeasures.length), 0)} className="px-4 py-10 text-center text-sm text-text-muted">No rows match these filters.</td></tr>}</tbody>
         {years.length > 0 && <tfoot><tr className="bg-surface font-bold text-text-primary">
-          <th className="sticky left-0 z-20 border-t-2 border-r border-accent bg-surface px-4 py-3 text-left">Grand Total</th>
+          <th scope="row" className="sticky left-0 z-20 border-t-2 border-r border-accent bg-surface px-4 py-3 text-left">Grand Total</th>
           {groups.flatMap((group) => group.type === "year"
-            ? group.modes.flatMap((mode) => HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + mode + "-" + metric.key} className="whitespace-nowrap border-t-2 border-accent px-3 py-3 text-right tabular-nums">{renderValue(totalAt(group.year, mode, metric), metric)}</td>))
-            : [["qty", HISTORY_MEASURES[0]], ["val", HISTORY_MEASURES[4]], ["discount_outflow", HISTORY_MEASURES[3]]].map(([key, metric]) => <td key={group.year + "-" + key} className="whitespace-nowrap border-t-2 border-l border-accent/20 px-3 py-3 text-right tabular-nums">{renderGrowth(totalGrowthAt(group.year, metric), metric)}</td>))}
+            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-t-2 border-accent px-3 py-3 text-right tabular-nums">{renderValue(totalAt(group.year, metric), metric)}</td>)
+            : growthMeasures.map(([, metric]) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-t-2 border-l border-accent/20 px-3 py-3 text-right tabular-nums">{renderGrowth(totalGrowthAt(group.year, metric), metric)}</td>))}
         </tr></tfoot>}
       </table>
     </div>

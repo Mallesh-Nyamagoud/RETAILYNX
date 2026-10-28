@@ -47,19 +47,10 @@ export default function TertiaryMonthwise() {
   const optionsFor = (name) => name === "month" ? (config?.months || []) : name === "fy" ? (config?.year_options || config?.years || []).map((year) => ({ value: year, label: fyLabel(year) })) : (config?.options?.[name] || []).map((value) => ({ value, label: value }));
   const setFilter = (name, values) => setFilters((current) => { const next = { ...current }; if (values.length) next[name] = values; else delete next[name]; return next; });
   const selectedMonths = (filters.month || []).map(Number);
-  const currentDimensionLabel = DIMENSIONS.find(([key]) => key === activeDimension)?.[1] || "Brandwise Analysis";
 
   return <main className="space-y-5 p-5 lg:p-7">
     <header><p className="text-xs font-semibold uppercase tracking-[.18em] text-accent">Retail sell-out</p><h1 className="mt-1 font-display text-2xl font-bold text-text-primary">Tertiary Monthwise Analysis</h1><p className="mt-1 text-sm text-text-muted">Monthly performance and historical breakdowns across quantity, value, discount, and discount outflow</p></header>
     <section className="flex flex-wrap gap-2 rounded-xl border border-border bg-surface p-3"><span className="flex items-center gap-1 self-center px-2 text-xs font-bold uppercase text-text-muted"><SlidersHorizontal size={14}/>Filters</span>{configQ.isLoading ? <LoadingState rows={1}/> : configQ.isError ? <ErrorState message={configQ.error.message} onRetry={() => configQ.refetch()}/> : <>{filterNames.map((name) => <MultiFilter key={name} name={name} options={optionsFor(name)} selected={(filters[name] || []).map(String)} onChange={(values) => setFilter(name, values)} open={openFilter === name} onToggle={() => setOpenFilter((current) => current === name ? null : name)} onClose={() => setOpenFilter(null)}/>)}{Object.keys(filters).length > 0 && <button type="button" onClick={() => setFilters({})} className="px-2 text-xs font-medium text-text-muted hover:text-negative">Reset filters</button>}</>}</section>
-
-    <section className="overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-        <div><h2 className="font-display text-base font-semibold text-text-primary">Monthwise Performance Consolidated</h2><p className="mt-1 text-xs text-text-muted">Fiscal months April to March, filtered by the selections above</p></div>
-        {monthwiseQ.data?.fy_context?.current_fy_label && <span className="text-xs text-text-secondary">Current FY: {monthwiseQ.data.fy_context.current_fy_label}</span>}
-      </div>
-      {monthwiseQ.isLoading ? <div className="space-y-4 p-4"><LoadingState rows={1}/><LoadingState rows={8}/></div> : monthwiseQ.isError ? <div className="p-4"><ErrorState message={monthwiseQ.error.message} onRetry={() => monthwiseQ.refetch()}/></div> : <div className="p-4"><TertiaryMonthwiseTable result={monthwiseQ.data}/></div>}
-    </section>
 
     {analysisQ.isLoading ? <section className="rounded-xl border border-border bg-surface p-4"><LoadingState rows={3}/></section> : analysisQ.isError ? <section className="rounded-xl border border-border bg-surface p-4"><ErrorState message={analysisQ.error.message} onRetry={() => analysisQ.refetch()}/></section> : <MonthwiseHistoryKpis payload={analysisQ.data} selectedMonths={selectedMonths} maxDate={monthwiseQ.data?.fy_context?.max_date}/>}
 
@@ -67,7 +58,15 @@ export default function TertiaryMonthwise() {
       <nav aria-label="Monthwise analysis dimensions" className="flex gap-1 overflow-x-auto border-b border-border px-2">
         {availableDimensions.map(([key, label]) => <button key={key} type="button" onClick={() => { setActiveDimension(key); setSearch(""); }} className={"whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold " + (activeDimension === key ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text-primary")}>{label}</button>)}
       </nav>
-      {analysisQ.isLoading ? <div className="p-4"><LoadingState rows={8}/></div> : analysisQ.isError ? <div className="p-4"><ErrorState message={analysisQ.error.message} onRetry={() => analysisQ.refetch()}/></div> : <MonthwiseDimensionTable payload={analysisQ.data} dimension={currentDimensionLabel} search={search} setSearch={setSearch}/>}
+      {analysisQ.isLoading ? <div className="p-4"><LoadingState rows={8}/></div> : analysisQ.isError ? <div className="p-4"><ErrorState message={analysisQ.error.message} onRetry={() => analysisQ.refetch()}/></div> : <MonthwiseDimensionTable payload={analysisQ.data} dimension={activeDimension} search={search} setSearch={setSearch} selectedMonths={selectedMonths}/>}
+    </section>
+
+    <section className="overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+        <div><h2 className="font-display text-base font-semibold text-text-primary">Monthwise Performance Consolidated</h2><p className="mt-1 text-xs text-text-muted">Fiscal months April to March, filtered by the selections above</p></div>
+        {monthwiseQ.data?.fy_context?.current_fy_label && <span className="text-xs text-text-secondary">Current FY: {monthwiseQ.data.fy_context.current_fy_label}</span>}
+      </div>
+      {monthwiseQ.isLoading ? <div className="space-y-4 p-4"><LoadingState rows={1}/><LoadingState rows={8}/></div> : monthwiseQ.isError ? <div className="p-4"><ErrorState message={monthwiseQ.error.message} onRetry={() => monthwiseQ.refetch()}/></div> : <div className="p-4"><TertiaryMonthwiseTable result={monthwiseQ.data}/></div>}
     </section>
   </main>;
 }
