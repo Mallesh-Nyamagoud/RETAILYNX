@@ -31,7 +31,7 @@ function GrowthValue({ value, pill = false }) {
   return <span className={"tabular-nums " + (pill ? "rounded-full px-2 py-1 text-xs font-semibold " + pillStyle + " " : "text-xs font-semibold ") + tone}>{value > 0 ? "+" : ""}{value.toFixed(1)}%{pill && " YoY"}</span>;
 }
 
-function HistoryTable({ title, metric, rows, total, growth }) {
+function HistoryTable({ title, metric, rows, total, growth, rangeLabel }) {
   const isQuantity = metric === "qty";
   const label = isQuantity ? "TOTAL QUANTITY (VOLUME)" : "TOTAL VALUE (REVENUE)";
   return <article className="rounded-xl border border-border bg-base/40 p-4 sm:p-5">
@@ -39,7 +39,7 @@ function HistoryTable({ title, metric, rows, total, growth }) {
       <div className="flex min-w-0 items-center gap-2.5"><span className={"flex h-8 w-8 shrink-0 items-center justify-center rounded-lg " + (isQuantity ? "bg-accent-soft text-accent" : "bg-positive-soft text-positive")}>{isQuantity ? <Boxes size={16}/> : <IndianRupee size={16}/>}</span><h3 className="truncate text-xs font-bold tracking-wide text-text-secondary">{label}</h3></div>
       <span className={"shrink-0 rounded border px-2 py-1 text-[10px] font-semibold " + (isQuantity ? "border-accent/30 text-accent" : "border-positive/30 text-positive")}>{isQuantity ? "Unit Basis" : <>INR (&#8377;)</>}</span>
     </div>
-    <div className="mb-4 mt-2 flex flex-wrap items-center gap-3"><p className="font-display text-3xl font-bold tracking-tight tabular-nums text-text-primary">{!isQuantity && <span>₹</span>}{fmt.format(total || 0)}</p><GrowthValue value={growth} pill/></div>
+    <div className="mb-4 mt-2 flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Overall total</p><p className="font-display text-3xl font-bold tracking-tight tabular-nums text-text-primary">{!isQuantity && <span>&#8377;</span>}{fmt.format(total || 0)}</p><p className="mt-0.5 text-[11px] text-text-muted">Across {rangeLabel}</p></div><div className="pb-1 text-right"><GrowthValue value={growth} pill/><p className="mt-1 text-[10px] text-text-muted">Current FY growth</p></div></div>
     <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full border-separate border-spacing-0 text-left text-sm">
         <thead className="bg-base text-[10px] font-semibold uppercase tracking-wider text-text-secondary"><tr><th className="px-3 py-2.5 sm:px-4">FY</th><th className="px-3 py-2.5 text-right sm:px-4">{isQuantity ? "QTY" : "VALUE"}</th><th className="px-3 py-2.5 text-right sm:px-4">GROWTH%</th></tr></thead>
@@ -115,6 +115,8 @@ export default function TertiarySummary() {
   const totals = payload?.totals || {};
   const availableYears = [...(payload?.years || [])].sort((a, b) => b - a);
   const chronologicalYears = [...(payload?.years || [])].filter((year) => anchor == null || year <= anchor).sort((a, b) => a - b);
+  const overallTotals = chronologicalYears.reduce((sum, year) => ({ qty: sum.qty + (totals[String(year)]?.qty || 0), val: sum.val + (totals[String(year)]?.val || 0) }), { qty: 0, val: 0 });
+  const overallRange = chronologicalYears.length ? fyName(chronologicalYears[0]) + " to " + fyName(chronologicalYears[chronologicalYears.length - 1]) : "available fiscal years";
   const comparisonGroups = chronologicalYears.flatMap((year, index) => {
     const cols = currentPartial && year === anchor - 1 ? ["qty", "lfytd_qty", "val", "lfytd_val"] : ["qty", "val"];
     const yearGroup = { type: "year", year, cols };
@@ -156,7 +158,7 @@ export default function TertiarySummary() {
     <section className="overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5"><div><h2 className="font-display text-base font-semibold text-text-primary">Historical Performance Consolidated</h2><p className="mt-1 text-xs text-text-muted">{anchor != null ? fyName(anchor) + (currentPartial ? " current year to date" : " selected anchor year") : "Select filters to view fiscal-year totals"}</p></div>{busy && <span role="status" className="text-xs text-text-muted">Updating performance...</span>}</div>
       {error && <p role="alert" className="border-b border-border px-4 py-3 text-sm text-negative">{error}</p>}
-      <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-2"><HistoryTable title="QTY" metric="qty" rows={historicalRows} total={totals[String(anchor)]?.qty || 0} growth={historicalRows[0]?.qtyGrowth}/><HistoryTable title="VALUE" metric="val" rows={historicalRows} total={totals[String(anchor)]?.val || 0} growth={historicalRows[0]?.valGrowth}/></div>
+      <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-2"><HistoryTable title="QTY" metric="qty" rows={historicalRows} total={overallTotals.qty} growth={historicalRows[0]?.qtyGrowth} rangeLabel={overallRange}/><HistoryTable title="VALUE" metric="val" rows={historicalRows} total={overallTotals.val} growth={historicalRows[0]?.valGrowth} rangeLabel={overallRange}/></div>
     </section>
     <ComparisonTable dimension={display(page)} rows={dataRows} groups={comparisonGroups} totals={totals} anchor={anchor} currentPartial={currentPartial} search={search} setSearch={setSearch}/>
   </main>;
