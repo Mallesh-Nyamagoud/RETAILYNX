@@ -75,28 +75,56 @@ def _report_cached(row_dimension, filters_key, _token):
 
     label=quote_ident(fields[row_dimension]); month_in=",".join(str(m) for m in lfytd_months) or "0"
     month_cond=(",".join(str(m) for m in months) if months else "")
-    annual_qty=(f"SUM(CASE WHEN month(f.date) IN ({month_cond}) THEN COALESCE(f.qty,0) ELSE 0 END)" if month_cond else "SUM(COALESCE(f.qty,0))")
-    annual_val=(f"SUM(CASE WHEN month(f.date) IN ({month_cond}) THEN COALESCE(f.bill_val,0) ELSE 0 END)" if month_cond else "SUM(COALESCE(f.bill_val,0))")
+    def annual_sum(column):
+        value = f"COALESCE(f.{quote_ident(column)},0)"
+        return f"SUM(CASE WHEN month(f.date) IN ({month_cond}) THEN {value} ELSE 0 END)" if month_cond else f"SUM({value})"
+
+    def ytd_sum(column):
+        return f"SUM(CASE WHEN month(f.date) IN ({month_in}) THEN COALESCE(f.{quote_ident(column)},0) ELSE 0 END)"
+
     sql=f"""
     SELECT dim.{label} AS label,
       CASE WHEN month(f.date)>=4 THEN year(f.date) ELSE year(f.date)-1 END AS fy_start,
-      {annual_qty} AS qty, {annual_val} AS val,
-      SUM(CASE WHEN month(f.date) IN ({month_in}) THEN COALESCE(f.qty,0) ELSE 0 END) AS ytd_qty,
-      SUM(CASE WHEN month(f.date) IN ({month_in}) THEN COALESCE(f.bill_val,0) ELSE 0 END) AS ytd_val
+      {annual_sum('qty')} AS qty,
+      {annual_sum('bill_val')} AS val,
+      {annual_sum('mrp_value')} AS mrp_value,
+      {annual_sum('discount')} AS discount,
+      {ytd_sum('qty')} AS ytd_qty,
+      {ytd_sum('bill_val')} AS ytd_val,
+      {ytd_sum('mrp_value')} AS ytd_mrp_value,
+      {ytd_sum('discount')} AS ytd_discount
     FROM {FACT} f {JOIN} WHERE {' AND '.join(clauses)}
     GROUP BY 1,2 ORDER BY 1
     """
     df=execute_df(sql,params)
     if df.empty: return {"years":years,"anchor":anchor,"current_fy":cfg["current_fy"],"current_fy_partial":cfg["current_fy_partial"],"rows":[],"totals":{}}
     df["label"]=df["label"].fillna("Unassigned").astype(str); rows=[]
+
+    def metric_values(frame, prefix=""):
+        qty = float(frame[f"{prefix}qty"].sum())
+        val = float(frame[f"{prefix}val"].sum())
+        mrp_value = float(frame[f"{prefix}mrp_value"].sum())
+        discount = float(frame[f"{prefix}discount"].sum())
+        return {
+            "qty": qty,
+            "val": val,
+            "mrp_value": mrp_value,
+            "discount": discount,
+            "discount_outflow": (discount / mrp_value * 100) if mrp_value else None,
+        }
+
     for name,sub in df.groupby("label",sort=True):
         by_year={}
         for y in years:
-            cur=sub[sub.fy_start==y]; prev=sub[sub.fy_start==y-1]
-            by_year[str(y)]={"qty":float(cur.qty.sum()),"val":float(cur.val.sum()),"lfytd_qty":float(cur.ytd_qty.sum()),"lfytd_val":float(cur.ytd_val.sum())}
+            cur=sub[sub.fy_start==y]
+            full=metric_values(cur)
+            ytd=metric_values(cur, "ytd_")
+            by_year[str(y)]={**full, **{"lfytd_" + key: value for key, value in ytd.items()}}
         rows.append({"label":name,"years":by_year})
     totals={}
     for y in years:
-        cur=df[df.fy_start==y]; prev=df[df.fy_start==y-1]
-        totals[str(y)]={"qty":float(cur.qty.sum()),"val":float(cur.val.sum()),"lfytd_qty":float(cur.ytd_qty.sum()),"lfytd_val":float(cur.ytd_val.sum())}
+        cur=df[df.fy_start==y]
+        full=metric_values(cur)
+        ytd=metric_values(cur, "ytd_")
+        totals[str(y)]={**full, **{"lfytd_" + key: value for key, value in ytd.items()}}
     return {"years":years,"anchor":anchor,"current_fy":cfg["current_fy"],"current_fy_partial":cfg["current_fy_partial"],"rows":rows,"totals":totals}
