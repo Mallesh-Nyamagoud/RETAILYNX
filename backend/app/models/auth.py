@@ -24,6 +24,10 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
 
 
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(min_length=1, max_length=8192)
+
+
 class UserCreate(BaseModel):
     """New user created by an admin. The password is optional - without it the
     account exists but cannot sign in until one is set."""

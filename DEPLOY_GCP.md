@@ -249,6 +249,42 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
 
 ---
 
+## 5a. Enable company Google sign-in (optional)
+
+This adds a Google button to `/login`; username/password remains available. The
+backend verifies Google's signed ID token and requires both the verified
+Workspace `hd` claim and email domain to be `adonisgroup.in`. Setting a Google
+email suffix alone is not enough to pass the domain check.
+
+1. In Google Cloud Console, choose the same project used by Cloud Run. Open
+   **Google Auth Platform** (or **APIs & Services ? OAuth consent screen**) and
+   configure the app name and support email. For a Workspace-only deployment,
+   choose **Internal** if Google offers that audience for your organization.
+2. Open **Clients ? Create client ? Web application**. Add the deployed app's
+   origin to **Authorized JavaScript origins**, for example:
+   `https://retailynx-1024802803614.asia-south1.run.app`. Add
+   `http://localhost:5173` for local development. This GIS credential callback
+   does not use an authorized redirect URI.
+3. Copy the **Client ID** (it ends in `.apps.googleusercontent.com`). In the
+   Cloud Run service, choose **Edit & deploy new revision ? Variables & Secrets**
+   and add `GOOGLE_OAUTH_CLIENT_ID` as a plain environment variable. It is a
+   public client identifier, not a client secret. Set
+   `GOOGLE_WORKSPACE_DOMAIN` to `adonisgroup.in` (the backend rejects a different value).
+4. For local development, put the same Client ID in `backend/.env` as
+   `GOOGLE_OAUTH_CLIENT_ID=...`. Keep secrets and `.env` files out of git.
+5. Deploy the revision, open `/login`, and use a managed `@adonisgroup.in`
+   Workspace account. If your company domain is not managed/verified in Google
+   Workspace, ask the Workspace administrator to confirm that first. Each
+   newly accepted company account is added as a `USER`; existing matching app
+   accounts keep their existing role. Promote the intended administrator in
+   **Admin ? User Access** before relying on that account for admin access.
+
+The OAuth client ID from the RETAILYNX web client is the safe public default;
+`GOOGLE_OAUTH_CLIENT_ID` can override it in Cloud Run. The regular login
+continues to work alongside Google sign-in. Invalid tokens, personal Google accounts, other Workspace
+domains, and disabled app accounts are rejected. Admin usage activity records
+the Google email and authentication method for each Google session.
+
 ## 6. Test it
 
 ### 6a. Health check (must be `200`, no login needed)
@@ -451,4 +487,6 @@ group by **Service**, and look at the last few days. Also
 | `LOGIN_LOCKOUT_SECONDS` | No | Lockout duration (default `900` = 15 min). |
 | `LOGIN_ATTEMPT_WINDOW_SECONDS` | No | Window the failures are counted in (default `900`). |
 | `BCRYPT_ROUNDS` | No | bcrypt cost for new hashes (default `12`). |
+| `GOOGLE_OAUTH_CLIENT_ID` | No | Google Web OAuth client ID; enables Workspace sign-in when configured. |
+| `GOOGLE_WORKSPACE_DOMAIN` | No | Must be `adonisgroup.in` when Google sign-in is enabled; other values stop startup. |
 | `PORT` | No | Injected by Cloud Run. **Never set it yourself.** |

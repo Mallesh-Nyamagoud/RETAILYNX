@@ -19,8 +19,13 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from app.core.config import IS_PRODUCTION, SESSION_SECRET_KEY
-from app.models.auth import LoginRequest, UserCreate, UserUpdate
+from app.core.config import (
+    GOOGLE_OAUTH_CLIENT_ID,
+    GOOGLE_WORKSPACE_DOMAIN,
+    IS_PRODUCTION,
+    SESSION_SECRET_KEY,
+)
+from app.models.auth import GoogleLoginRequest, LoginRequest, UserCreate, UserUpdate
 from app.services import auth as auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -82,6 +87,68 @@ CurrentAdmin = Annotated[dict, Depends(get_current_admin)]
 
 
 # --- Session --------------------------------------------------------------
+@router.get("/google/config")
+def google_login_config() -> dict:
+    """Public client settings for the Google Identity Services button."""
+    return {"client_id": GOOGLE_OAUTH_CLIENT_ID, "domain": GOOGLE_WORKSPACE_DOMAIN}
+
+
+@router.post("/google/login")
+def google_login(payload: GoogleLoginRequest, response: Response) -> dict:
+    """Verify a Google Workspace ID token and issue the normal app session."""
+    if not GOOGLE_OAUTH_CLIENT_ID:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Google sign-in is not configured")
+
+    from google.auth.transport.requests import Request as GoogleRequest
+    from google.oauth2 import id_token
+
+    try:
+        identity = id_token.verify_oauth2_token(
+            payload.credential, GoogleRequest(), GOOGLE_OAUTH_CLIENT_ID
+        )
+    except Exception:
+        # Do not include or log the submitted bearer token.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Google sign-in could not be verified")
+
+    email = str(identity.get("email") or "").strip().lower()
+    hosted_domain = str(identity.get("hd") or "").strip().lower()
+    google_sub = str(identity.get("sub") or "").strip()
+    issuer = identity.get("iss")
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Google sign-in could not be verified")
+    if identity.get("email_verified") is not True or not google_sub or not email:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Use a verified company Google account")
+    if hosted_domain != GOOGLE_WORKSPACE_DOMAIN or email.rsplit("@", 1)[-1] != GOOGLE_WORKSPACE_DOMAIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"Only {GOOGLE_WORKSPACE_DOMAIN} accounts can sign in")
+
+    user = auth_service.get_user_by_google_sub(google_sub)
+    if user is None:
+        # Workspace verified email is authoritative; link a pre-existing local
+        # account by email so its role and permissions remain intact.
+        user = auth_service.get_user_by_username(email)
+        if user is None:
+            try:
+                user = auth_service.add_user(email, "USER", google_sub=google_sub)
+            except ValueError:
+                user = auth_service.get_user_by_username(email)
+        if user is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Could not create the application account")
+        if not user.get("google_sub"):
+            try:
+                auth_service.link_google_sub(user["id"], google_sub)
+            except Exception:
+                # A concurrent Google login may have linked this subject first.
+                user = auth_service.get_user_by_google_sub(google_sub) or user
+
+    if not user["is_active"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Your account has been disabled")
+
+    session_id = uuid.uuid4().hex
+    auth_service.start_usage_session(session_id, user, auth_method="google", google_email=email)
+    _set_session_cookie(response, user["id"], session_id)
+    return user
+
+
 @router.post("/login")
 def login(payload: LoginRequest, response: Response) -> dict:
     """Verify credentials and issue the signed session cookie."""
@@ -94,7 +161,7 @@ def login(payload: LoginRequest, response: Response) -> dict:
             status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password"
         )
     session_id = uuid.uuid4().hex
-    auth_service.start_usage_session(session_id, user)
+    auth_service.start_usage_session(session_id, user, auth_method="password")
     _set_session_cookie(response, user["id"], session_id)
     return user
 
@@ -106,7 +173,7 @@ def admin_login(payload: LoginRequest, response: Response) -> dict:
     if user is None or user["role"] != "ADMIN":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Invalid admin username or password")
     session_id = uuid.uuid4().hex
-    auth_service.start_usage_session(session_id, user)
+    auth_service.start_usage_session(session_id, user, auth_method="password")
     _set_session_cookie(response, user["id"], session_id)
     return user
 

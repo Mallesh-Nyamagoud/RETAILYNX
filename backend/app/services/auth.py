@@ -39,6 +39,7 @@ from sqlalchemy import (
     delete,
     func,
     insert,
+    inspect,
     select,
     update,
 )
@@ -96,6 +97,7 @@ users = Table(
     Column("role", String(20), nullable=False, server_default="USER"),
     Column("is_active", Boolean, nullable=False, server_default="1"),
     Column("password_hash", String(255)),
+    Column("google_sub", String(255)),
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
@@ -108,6 +110,8 @@ usage_sessions = Table(
     Column("login_at", Integer, nullable=False), Column("logout_at", Integer),
     Column("last_seen_at", Integer, nullable=False),
     Column("interaction_count", Integer, nullable=False, server_default="0"),
+    Column("auth_method", String(20), nullable=False, server_default="password"),
+    Column("google_email", String(255)),
 )
 
 login_attempts = Table(
@@ -218,6 +222,7 @@ def _public(row: Mapping | None) -> dict | None:
         return None
     data = dict(row)
     data.pop("password_hash", None)
+    data.pop("google_sub", None)  # stable provider identifier stays server-side
     if isinstance(data.get("created_at"), datetime):
         data["created_at"] = data["created_at"].isoformat()
     return data
@@ -230,7 +235,28 @@ def init_db() -> None:
     """Create the tables and seed the first ADMIN (exactly once)."""
     engine = get_engine()
     metadata.create_all(engine)
+    _migrate_auth_columns(engine)
     _bootstrap_admin(engine)
+
+
+def _migrate_auth_columns(engine) -> None:
+    """Add optional Google identity/session fields to existing auth databases."""
+    additions = {
+        "users": {"google_sub": "VARCHAR(255)"},
+        "usage_sessions": {
+            "auth_method": "VARCHAR(20) NOT NULL DEFAULT 'password'",
+            "google_email": "VARCHAR(255)",
+        },
+    }
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table_name, columns in additions.items():
+            existing = {column["name"] for column in inspector.get_columns(table_name)}
+            for name, definition in columns.items():
+                if name not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}")
+    from sqlalchemy import Index
+    Index("ix_users_google_sub", users.c.google_sub, unique=True).create(engine, checkfirst=True)
 
 
 def _bootstrap_admin(engine) -> None:
@@ -356,6 +382,16 @@ def get_user_by_username(username: str) -> dict | None:
         return _fetch(conn, username=username)
 
 
+def get_user_by_google_sub(google_sub: str) -> dict | None:
+    with get_engine().begin() as conn:
+        return _public(conn.execute(select(users).where(users.c.google_sub == google_sub)).mappings().first())
+
+
+def link_google_sub(user_id: int, google_sub: str) -> None:
+    with get_engine().begin() as conn:
+        conn.execute(update(users).where(users.c.id == user_id).values(google_sub=google_sub))
+
+
 def get_user_by_id(user_id: int) -> dict | None:
     with get_engine().begin() as conn:
         return _fetch(conn, user_id=user_id)
@@ -367,10 +403,10 @@ def get_all_users() -> list[dict]:
     return [_public(row) for row in rows]
 
 
-def start_usage_session(session_id: str, user: Mapping) -> None:
+def start_usage_session(session_id: str, user: Mapping, auth_method: str = "password", google_email: str | None = None) -> None:
     now = int(time.time())
     with get_engine().begin() as conn:
-        conn.execute(insert(usage_sessions).values(id=session_id, user_id=user["id"], username=user["username"], login_at=now, last_seen_at=now, interaction_count=0))
+        conn.execute(insert(usage_sessions).values(id=session_id, user_id=user["id"], username=user["username"], login_at=now, last_seen_at=now, interaction_count=0, auth_method=auth_method, google_email=google_email))
 
 
 def record_interaction(session_id: str) -> None:
@@ -434,7 +470,7 @@ def authenticate(username: str, password: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # Mutations (used by the Admin "User Access" screen)
 # ---------------------------------------------------------------------------
-def add_user(username: str, role: str = "USER", password: str | None = None) -> dict:
+def add_user(username: str, role: str = "USER", password: str | None = None, google_sub: str | None = None) -> dict:
     """Create a user. `password` may be omitted, but the account then cannot
     sign in until an admin sets one."""
     normalized = normalize_username(username)
@@ -451,7 +487,7 @@ def add_user(username: str, role: str = "USER", password: str | None = None) -> 
         with get_engine().begin() as conn:
             result = conn.execute(
                 insert(users).values(
-                    username=normalized, role=role, is_active=True, password_hash=password_hash
+                    username=normalized, role=role, is_active=True, password_hash=password_hash, google_sub=google_sub
                 )
             )
             new_id = result.inserted_primary_key[0]

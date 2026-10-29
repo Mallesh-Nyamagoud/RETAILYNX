@@ -20,6 +20,12 @@ export const useAuthStore = create((set) => ({
     return data;
   },
 
+  googleLogin: async (credential) => {
+    const { data } = await http.post("/auth/google/login", { credential });
+    set({ user: data, loading: false });
+    return data;
+  },
+
   adminLogin: async (username, password) => {
     const { data } = await http.post("/auth/admin-login", { username, password });
     set({ user: data, loading: false });

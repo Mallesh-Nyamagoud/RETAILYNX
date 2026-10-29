@@ -66,6 +66,12 @@ except OSError:  # reported clearly by validate_startup_config() instead
 SESSION_SECRET_KEY = _text("SESSION_SECRET_KEY")
 ADMIN_USERNAME = _text("ADMIN_USERNAME")
 ADMIN_PASSWORD = _text("ADMIN_PASSWORD")
+GOOGLE_OAUTH_CLIENT_ID = _text(
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "1024802803614-37f9fs9ec718vk9tubj5bjsc6osa2217.apps.googleusercontent.com",
+)
+GOOGLE_WORKSPACE_DOMAIN = "adonisgroup.in"
+_CONFIGURED_GOOGLE_WORKSPACE_DOMAIN = _text("GOOGLE_WORKSPACE_DOMAIN", GOOGLE_WORKSPACE_DOMAIN).lower()
 
 # The placeholder the old dev config shipped - rejected in production so a real
 # deployment can never sign its session cookies with a public string.
@@ -157,6 +163,8 @@ def validate_startup_config() -> None:
         )
     if ADMIN_PASSWORD and len(ADMIN_PASSWORD) < 8:
         problems.append("ADMIN_PASSWORD must be at least 8 characters long")
+    if GOOGLE_OAUTH_CLIENT_ID and _CONFIGURED_GOOGLE_WORKSPACE_DOMAIN != GOOGLE_WORKSPACE_DOMAIN:
+        problems.append("GOOGLE_WORKSPACE_DOMAIN must be exactly adonisgroup.in")
 
     if problems:
         raise RuntimeError(
