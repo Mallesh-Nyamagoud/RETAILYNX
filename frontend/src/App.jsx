@@ -12,6 +12,7 @@ import CssStockTracking from "./pages/CssStockTracking";
 import SohAnalysis from "./pages/SohAnalysis";
 import BaseStockAnalysis from "./pages/BaseStockAnalysis";
 import AdminUsers from "./pages/AdminUsers";
+import AdminOverview from "./pages/AdminOverview";
 import Login from "./pages/Login";
 import { useAuthStore } from "./store/useAuthStore";
 import { useEffect } from "react";
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/soh" element={<Navigate to="/soh/summary" replace />} />
           <Route path="/soh/summary" element={<SohAnalysis />} />
           <Route path="/soh/base-stock" element={<BaseStockAnalysis />} />
+          <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminOverview /></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute requireAdmin><AdminUsers /></ProtectedRoute>} />
         </Route>
       </Routes>

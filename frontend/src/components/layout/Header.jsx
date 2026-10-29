@@ -1,4 +1,4 @@
-import { Moon, Sun, RefreshCw, User, LogOut, Users } from "lucide-react";
+import { Moon, Sun, RefreshCw, User, LogOut, Users, Activity } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import clsx from "clsx";
 import { useMutation } from "@tanstack/react-query";
@@ -102,6 +102,14 @@ export default function Header() {
                   <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
                     Admin
                   </div>
+                  <NavLink
+                    to="/admin"
+                    onClick={() => setShowUserMenu(false)}
+                    className={({ isActive }) => clsx("flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-secondary hover:text-text-primary hover:bg-card-hover")}
+                  >
+                    <Activity size={16} />
+                    Admin Overview
+                  </NavLink>
                   <NavLink
                     to="/admin/users"
                     onClick={() => setShowUserMenu(false)}

@@ -100,6 +100,16 @@ users = Table(
 )
 
 # One row per failed login. Kept deliberately tiny and pruned on every write.
+usage_sessions = Table(
+    "usage_sessions", metadata,
+    Column("id", String(64), primary_key=True),
+    Column("user_id", Integer, nullable=False, index=True),
+    Column("username", String(_USERNAME_MAX_LENGTH), nullable=False),
+    Column("login_at", Integer, nullable=False), Column("logout_at", Integer),
+    Column("last_seen_at", Integer, nullable=False),
+    Column("interaction_count", Integer, nullable=False, server_default="0"),
+)
+
 login_attempts = Table(
     "login_attempts",
     metadata,
@@ -355,6 +365,37 @@ def get_all_users() -> list[dict]:
     with get_engine().begin() as conn:
         rows = conn.execute(select(users).order_by(users.c.id)).mappings().all()
     return [_public(row) for row in rows]
+
+
+def start_usage_session(session_id: str, user: Mapping) -> None:
+    now = int(time.time())
+    with get_engine().begin() as conn:
+        conn.execute(insert(usage_sessions).values(id=session_id, user_id=user["id"], username=user["username"], login_at=now, last_seen_at=now, interaction_count=0))
+
+
+def record_interaction(session_id: str) -> None:
+    now = int(time.time())
+    with get_engine().begin() as conn:
+        conn.execute(update(usage_sessions).where(usage_sessions.c.id == session_id, usage_sessions.c.logout_at.is_(None)).values(last_seen_at=now, interaction_count=usage_sessions.c.interaction_count + 1))
+
+
+def end_usage_session(session_id: str) -> None:
+    now = int(time.time())
+    with get_engine().begin() as conn:
+        conn.execute(update(usage_sessions).where(usage_sessions.c.id == session_id, usage_sessions.c.logout_at.is_(None)).values(logout_at=now, last_seen_at=now))
+
+
+def get_usage_sessions(limit: int = 500) -> list[dict]:
+    with get_engine().begin() as conn:
+        rows = conn.execute(select(usage_sessions).order_by(usage_sessions.c.login_at.desc()).limit(limit)).mappings().all()
+    now = int(time.time())
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["duration_seconds"] = max(0, (item["logout_at"] or now) - item["login_at"])
+        item["is_active"] = item["logout_at"] is None
+        result.append(item)
+    return result
 
 
 def authenticate(username: str, password: str) -> dict | None:

@@ -14,6 +14,7 @@ Cookie flags:
 from __future__ import annotations
 
 from typing import Annotated
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from itsdangerous import BadSignature, URLSafeSerializer
@@ -32,10 +33,10 @@ SESSION_MAX_AGE_SECONDS = 60 * 60 * 12  # 12 hours
 serializer = URLSafeSerializer(SESSION_SECRET_KEY or "unsafe-dev-only-key")
 
 
-def _set_session_cookie(response: Response, user_id: int) -> None:
+def _set_session_cookie(response: Response, user_id: int, session_id: str) -> None:
     response.set_cookie(
         key=COOKIE_NAME,
-        value=serializer.dumps(user_id),
+        value=serializer.dumps({"user_id": user_id, "session_id": session_id}),
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
         secure=IS_PRODUCTION,
@@ -51,7 +52,9 @@ def get_current_user(request: Request) -> dict:
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
-        user_id = serializer.loads(token)
+        payload = serializer.loads(token)
+        user_id = payload.get("user_id") if isinstance(payload, dict) else payload
+        session_id = payload.get("session_id") if isinstance(payload, dict) else None
     except BadSignature:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
 
@@ -60,6 +63,8 @@ def get_current_user(request: Request) -> dict:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
     if not user["is_active"]:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Your account has been disabled")
+    if session_id:
+        auth_service.record_interaction(session_id)
     return user
 
 
@@ -88,13 +93,23 @@ def login(payload: LoginRequest, response: Response) -> dict:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password"
         )
-    _set_session_cookie(response, user["id"])
+    session_id = uuid.uuid4().hex
+    auth_service.start_usage_session(session_id, user)
+    _set_session_cookie(response, user["id"], session_id)
     return user
 
 
 @router.post("/logout")
-def logout(response: Response) -> dict:
-    """Clear the session cookie."""
+def logout(request: Request, response: Response) -> dict:
+    """Record logout and clear the session cookie."""
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        try:
+            payload = serializer.loads(token)
+            if isinstance(payload, dict) and payload.get("session_id"):
+                auth_service.end_usage_session(payload["session_id"])
+        except BadSignature:
+            pass
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"status": "ok"}
 
@@ -106,6 +121,19 @@ def read_current_user(user: CurrentUser) -> dict:
 
 
 # --- Admin: User Access ---------------------------------------------------
+@router.get("/admin/overview")
+def admin_overview(admin: CurrentAdmin) -> dict:
+    from app.core.database import execute
+
+    def latest_by_brand(schema: str, date_column: str) -> list[dict]:
+        try:
+            rows = execute(f"SELECT brand_code, MAX({date_column}) FROM {schema}.data WHERE brand_code IS NOT NULL GROUP BY brand_code ORDER BY brand_code")
+        except Exception:
+            return []
+        return [{"brand": str(brand), "max_date": value.isoformat() if hasattr(value, "isoformat") else str(value) if value is not None else None} for brand, value in rows]
+
+    return {"sessions": auth_service.get_usage_sessions(), "tertiary": latest_by_brand("tertiary_data", "date"), "secondary": latest_by_brand("secondary_data", "bill_date")}
+
 @router.get("/users")
 def list_users(admin: CurrentAdmin) -> list[dict]:
     return auth_service.get_all_users()
