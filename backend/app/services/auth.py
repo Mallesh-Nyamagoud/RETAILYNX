@@ -112,6 +112,11 @@ usage_sessions = Table(
     Column("interaction_count", Integer, nullable=False, server_default="0"),
     Column("auth_method", String(20), nullable=False, server_default="password"),
     Column("google_email", String(255)),
+    Column("professional_name", String(150)),
+    Column("organization", String(150)),
+    Column("job_title", String(120)),
+    Column("phone", String(40)),
+    Column("access_reason", String(500)),
 )
 
 login_attempts = Table(
@@ -246,6 +251,11 @@ def _migrate_auth_columns(engine) -> None:
         "usage_sessions": {
             "auth_method": "VARCHAR(20) NOT NULL DEFAULT 'password'",
             "google_email": "VARCHAR(255)",
+            "professional_name": "VARCHAR(150)",
+            "organization": "VARCHAR(150)",
+            "job_title": "VARCHAR(120)",
+            "phone": "VARCHAR(40)",
+            "access_reason": "VARCHAR(500)",
         },
     }
     inspector = inspect(engine)
@@ -403,10 +413,11 @@ def get_all_users() -> list[dict]:
     return [_public(row) for row in rows]
 
 
-def start_usage_session(session_id: str, user: Mapping, auth_method: str = "password", google_email: str | None = None) -> None:
+def start_usage_session(session_id: str, user: Mapping, auth_method: str = "password", google_email: str | None = None, professional_details: Mapping | None = None) -> None:
     now = int(time.time())
+    details = professional_details or {}
     with get_engine().begin() as conn:
-        conn.execute(insert(usage_sessions).values(id=session_id, user_id=user["id"], username=user["username"], login_at=now, last_seen_at=now, interaction_count=0, auth_method=auth_method, google_email=google_email))
+        conn.execute(insert(usage_sessions).values(id=session_id, user_id=user["id"], username=user["username"], login_at=now, last_seen_at=now, interaction_count=0, auth_method=auth_method, google_email=google_email, professional_name=details.get("full_name"), organization=details.get("organization"), job_title=details.get("job_title"), phone=details.get("phone"), access_reason=details.get("access_reason")))
 
 
 def record_interaction(session_id: str) -> None:

@@ -120,9 +120,23 @@ def google_login(payload: GoogleLoginRequest, response: Response) -> dict:
     if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Google sign-in could not be verified")
     if identity.get("email_verified") is not True or not google_sub or not email:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Use a verified company Google account")
-    if hosted_domain != GOOGLE_WORKSPACE_DOMAIN or email.rsplit("@", 1)[-1] != GOOGLE_WORKSPACE_DOMAIN:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"Only {GOOGLE_WORKSPACE_DOMAIN} accounts can sign in")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Use a verified Google account")
+    is_company_account = (
+        hosted_domain == GOOGLE_WORKSPACE_DOMAIN
+        and email.rsplit("@", 1)[-1] == GOOGLE_WORKSPACE_DOMAIN
+    )
+    professional_details = {
+        "full_name": (payload.full_name or "").strip(),
+        "organization": (payload.organization or "").strip(),
+        "job_title": (payload.job_title or "").strip(),
+        "phone": (payload.phone or "").strip(),
+        "access_reason": (payload.access_reason or "").strip(),
+    }
+    if not is_company_account and not all(professional_details.values()):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Complete all professional details to continue with a non-company Google account",
+        )
 
     user = auth_service.get_user_by_google_sub(google_sub)
     if user is None:
@@ -147,7 +161,13 @@ def google_login(payload: GoogleLoginRequest, response: Response) -> dict:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Your account has been disabled")
 
     session_id = uuid.uuid4().hex
-    auth_service.start_usage_session(session_id, user, auth_method="google", google_email=email)
+    auth_service.start_usage_session(
+        session_id,
+        user,
+        auth_method="google",
+        google_email=email,
+        professional_details=professional_details if not is_company_account else None,
+    )
     _set_session_cookie(response, user["id"], session_id)
     return user
 
