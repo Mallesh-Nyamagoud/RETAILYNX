@@ -136,14 +136,42 @@ def read_current_user(user: CurrentUser) -> dict:
 def admin_overview(admin: CurrentAdmin) -> dict:
     from app.core.database import execute
 
-    def latest_by_brand(schema: str, date_column: str) -> list[dict]:
+    def latest_by_brand(schema: str, date_column: str, source_name_column: str) -> list[dict]:
+        from app.core.database import column_exists
+
+        if not column_exists(schema, "data", source_name_column):
+            return []
         try:
-            rows = execute(f"SELECT brand_code, MAX({date_column}) FROM {schema}.data WHERE brand_code IS NOT NULL GROUP BY brand_code ORDER BY brand_code")
+            rows = execute(
+                f"WITH brand_names AS ("
+                f"SELECT CAST(brand_code AS VARCHAR) AS brand_code, "
+                f"MIN(NULLIF(TRIM(brand), '')) AS brand_name "
+                f"FROM store_master.store_details GROUP BY brand_code) "
+                f"SELECT COALESCE(bn.brand_name, "
+                f"NULLIF(TRIM(CAST(d.{source_name_column} AS VARCHAR)), '')) AS brand_name, "
+                f"MAX(d.{date_column}) AS max_date "
+                f"FROM {schema}.data d LEFT JOIN brand_names bn "
+                f"ON CAST(d.brand_code AS VARCHAR) = bn.brand_code "
+                f"WHERE d.{source_name_column} IS NOT NULL "
+                f"AND (bn.brand_name IS NOT NULL OR "
+                f"TRY_CAST(NULLIF(TRIM(CAST(d.{source_name_column} AS VARCHAR)), '') AS BIGINT) IS NULL) "
+                f"GROUP BY 1 ORDER BY 1"
+            )
         except Exception:
             return []
-        return [{"brand": str(brand), "max_date": value.isoformat() if hasattr(value, "isoformat") else str(value) if value is not None else None} for brand, value in rows]
+        return [
+            {
+                "brand_name": str(brand_name),
+                "max_date": value.isoformat() if hasattr(value, "isoformat") else str(value) if value is not None else None,
+            }
+            for brand_name, value in rows
+        ]
 
-    return {"sessions": auth_service.get_usage_sessions(), "tertiary": latest_by_brand("tertiary_data", "date"), "secondary": latest_by_brand("secondary_data", "bill_date")}
+    return {
+        "sessions": auth_service.get_usage_sessions(),
+        "tertiary": latest_by_brand("tertiary_data", "date", "brand"),
+        "secondary": latest_by_brand("secondary_data", "bill_date", "brand_desc"),
+    }
 
 @router.get("/users")
 def list_users(admin: CurrentAdmin) -> list[dict]:

@@ -24,12 +24,12 @@ function DataCard({ title, rows, loading }) {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-base/50 text-[11px] uppercase tracking-wider text-text-muted">
-              <tr><th className="px-5 py-3">Brand</th><th className="px-5 py-3 text-right">Latest data date</th></tr>
+              <tr><th className="px-5 py-3">Brand name</th><th className="px-5 py-3 text-right">Latest data date</th></tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {rows?.map((row) => <tr key={row.brand}>
-                <td className="px-5 py-3 font-medium text-text-primary">{row.brand}</td>
-                <td className="px-5 py-3 text-right text-text-secondary">{row.max_date || "—"}</td>
+              {rows?.map((row) => <tr key={row.brand_name}>
+                <td className="px-5 py-3 font-medium text-text-primary">{row.brand_name}</td>
+                <td className="px-5 py-3 text-right text-text-secondary">{row.max_date ? String(row.max_date).slice(0, 10) : "—"}</td>
               </tr>)}
               {!rows?.length && <tr><td colSpan={2} className="px-5 py-6 text-center text-text-muted">No brand data available</td></tr>}
             </tbody>
