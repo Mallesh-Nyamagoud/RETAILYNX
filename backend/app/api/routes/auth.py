@@ -99,6 +99,17 @@ def login(payload: LoginRequest, response: Response) -> dict:
     return user
 
 
+@router.post("/admin-login")
+def admin_login(payload: LoginRequest, response: Response) -> dict:
+    """Sign in only an ADMIN account from the account menu's admin gate."""
+    user = auth_service.authenticate(payload.username, payload.password)
+    if user is None or user["role"] != "ADMIN":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Invalid admin username or password")
+    session_id = uuid.uuid4().hex
+    auth_service.start_usage_session(session_id, user)
+    _set_session_cookie(response, user["id"], session_id)
+    return user
+
 @router.post("/logout")
 def logout(request: Request, response: Response) -> dict:
     """Record logout and clear the session cookie."""
