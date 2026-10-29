@@ -66,10 +66,7 @@ except OSError:  # reported clearly by validate_startup_config() instead
 SESSION_SECRET_KEY = _text("SESSION_SECRET_KEY")
 ADMIN_USERNAME = _text("ADMIN_USERNAME")
 ADMIN_PASSWORD = _text("ADMIN_PASSWORD")
-GOOGLE_OAUTH_CLIENT_ID = _text(
-    "GOOGLE_OAUTH_CLIENT_ID",
-    "1024802803614-37f9fs9ec718vk9tubj5bjsc6osa2217.apps.googleusercontent.com",
-)
+GOOGLE_OAUTH_CLIENT_ID = "1024802803614-37f9fs9ec718vk9tubj5bjsc6osa2217.apps.googleusercontent.com"
 GOOGLE_WORKSPACE_DOMAIN = "adonisgroup.in"
 _CONFIGURED_GOOGLE_WORKSPACE_DOMAIN = _text("GOOGLE_WORKSPACE_DOMAIN", GOOGLE_WORKSPACE_DOMAIN).lower()
 

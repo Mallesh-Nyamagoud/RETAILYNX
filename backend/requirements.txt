@@ -11,7 +11,7 @@ SQLAlchemy==2.0.36          # portable ORM core: SQLite locally, Postgres on Clo
 psycopg[binary]==3.2.3      # PostgreSQL driver (Cloud SQL / any external Postgres)
 bcrypt==4.2.1               # password hashing (salted, adaptive cost)
 itsdangerous==2.2.0         # signs the session cookie
-google-auth==2.62.0         # verifies Google Identity Services ID tokens
+google-auth[requests]==2.62.0  # verifies Google ID tokens with the requests transport
 
 # --- Analytics engine ---
 duckdb==1.1.3               # single attached catalog + Parquet reader

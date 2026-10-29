@@ -99,8 +99,11 @@ def google_login(payload: GoogleLoginRequest, response: Response) -> dict:
     if not GOOGLE_OAUTH_CLIENT_ID:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Google sign-in is not configured")
 
-    from google.auth.transport.requests import Request as GoogleRequest
-    from google.oauth2 import id_token
+    try:
+        from google.auth.transport.requests import Request as GoogleRequest
+        from google.oauth2 import id_token
+    except ImportError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Google sign-in verification is unavailable") from None
 
     try:
         identity = id_token.verify_oauth2_token(
