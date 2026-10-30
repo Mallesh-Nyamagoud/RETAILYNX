@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Boxes, ChevronDown, IndianRupee, Search, SlidersHorizontal } from "lucide-react";
 import { tertiaryApi } from "../api/client";
 
-const pages = [["brand", "Brands comparison"], ["store", "Brand-store performance"], ["department", "Department-wise performance"], ["state", "State-wise performance"], ["group", "Group-wise performance"]];
+const pages = [["brand", "Brands comparison"], ["store", "Brand-store performance"], ["store_status", "Store status performance"], ["department", "Department-wise performance"], ["state", "State-wise performance"], ["group", "Group-wise performance"]];
 const filterOrder = ["store", "department", "store_status", "store_type", "brand", "state", "group", "month", "fy"];
 const display = (s) => s.replaceAll("_", " ").split(" ").map((word) => word ? word[0].toUpperCase() + word.slice(1) : word).join(" ");
 const fmt = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });

@@ -27,6 +27,8 @@ import { useAppStore } from "../../store/useAppStore";
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, numeral: null },
   { to: "/secondary", label: "Secondary Sales Analysis", icon: TrendingUp, numeral: "I" },
+  { to: "/secondary/summary", label: "Secondary Sales Summary", icon: BarChart3, numeral: null },
+  { to: "/secondary/monthwise", label: "Secondary Monthwise Analysis", icon: CalendarRange, numeral: null },
   { to: "/store-master", label: "Store Master", icon: Store, numeral: "II" },
   { to: "/sql-platform", label: "SQL Platform", icon: TerminalSquare, numeral: "III" },
   { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3, numeral: "IV" },

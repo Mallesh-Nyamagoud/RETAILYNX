@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppShell from "./components/layout/AppShell";
 import Dashboard from "./pages/Dashboard";
 import SecondaryAnalysis from "./pages/SecondaryAnalysis";
+import SecondarySummary from "./pages/SecondarySummary";
 import TertiaryAnalysis from "./pages/TertiaryAnalysis";
 import TertiarySummary from "./pages/TertiarySummary";
 import TertiaryMonthwise from "./pages/TertiaryMonthwise";
@@ -48,6 +49,8 @@ export default function App() {
         <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/secondary" element={<SecondaryAnalysis />} />
+          <Route path="/secondary/summary" element={<SecondarySummary />} />
+          <Route path="/secondary/monthwise" element={<SecondaryAnalysis initialTab="monthwise" />} />
           <Route path="/tertiary" element={<TertiaryAnalysis />} />
           <Route path="/tertiary/summary" element={<TertiarySummary />} />
           <Route path="/tertiary/monthwise" element={<TertiaryMonthwise />} />
