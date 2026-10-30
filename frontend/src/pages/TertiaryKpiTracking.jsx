@@ -84,7 +84,7 @@ function BucketTable({ title, dimensionLabel, buckets, rows, periodLabels, searc
         </thead>
         <tbody>
           {visibleRows.length ? visibleRows.map((row, index) => <tr key={row.label} className={"h-12 hover:bg-accent-soft/25 " + (row.is_total ? "bg-accent-soft/35 font-bold" : index % 2 ? "bg-base/35" : "bg-surface")}>
-            <th className={"sticky left-0 z-10 border-b border-r border-border px-4 text-left " + (row.is_total ? "border-t-2 border-t-accent bg-surface font-bold text-text-primary" : "bg-inherit font-medium text-text-primary")}>{row.label}</th>
+            <th className={"sticky left-0 z-10 border-b border-r border-border bg-surface px-4 text-left text-text-primary " + (row.is_total ? "border-t-2 border-t-accent font-bold" : "font-medium")}>{row.label}</th>
             {periods.flatMap(([key]) => buckets.map((bucket, columnIndex) => <td key={key + bucket} className={"border-b border-border px-2 " + (row.is_total ? "border-t-2 border-t-accent" : "") + (key === "growth" ? (columnIndex === 0 ? " border-l-4 border-l-accent/50 " : " border-l border-border/70 ") + "bg-accent-soft/10" : columnIndex === 0 ? " border-l border-border/70" : "")}>
               <BucketCell value={row.periods?.[key]?.[bucket]} growth={key === "growth"} />
             </td>))}

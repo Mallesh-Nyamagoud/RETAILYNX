@@ -253,7 +253,7 @@ export default function DataTable({
               <col key={col.id} style={widthFor(col) ? { width: widthFor(col) } : undefined} />
             ))}
           </colgroup>
-          <thead ref={headerRef} className="sticky top-0 z-[4] bg-card-hover backdrop-blur">
+          <thead ref={headerRef} className="sticky top-0 z-[4] bg-card-hover">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
                 {hg.headers.map((header, idx) => {

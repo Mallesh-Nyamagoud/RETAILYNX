@@ -185,7 +185,7 @@ function StickyTable({ columns, data, rowHeaderLabel = "Brand", maxHeightClass =
   return (
     <div className={clsx("overflow-auto relative", maxHeightClass)}>
       <table className="w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0, tableLayout: "auto" }}>
-        <thead ref={headerRef} className="sticky top-0 z-[4] bg-card-hover backdrop-blur-sm">
+        <thead ref={headerRef} className="sticky top-0 z-[4] bg-card-hover">
           <tr>
             <th rowSpan={2} className="px-3 py-2 text-left text-[11px] font-semibold tracking-wide text-text-secondary uppercase border-b border-r border-border sticky left-0 bg-card-hover z-[5]" style={{ minWidth: 160 }}>{rowHeaderLabel}</th>
             {columns.map((col) => (
