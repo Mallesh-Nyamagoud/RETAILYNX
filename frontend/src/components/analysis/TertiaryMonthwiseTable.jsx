@@ -176,16 +176,16 @@ function makeHistoryRows(payload, metric, selectedMonths, maxDate) {
     return [fullRow];
   });
 }
-export function MonthwiseHistoryKpis({ payload, selectedMonths = [], maxDate }) {
+export function MonthwiseHistoryKpis({ payload, selectedMonths = [], maxDate, includeDiscount = true }) {
   const qtyRows = makeHistoryRows(payload, "qty", selectedMonths, maxDate);
   const valueRows = makeHistoryRows(payload, "val", selectedMonths, maxDate);
-  const outflowRows = makeHistoryRows(payload, "discount_outflow", selectedMonths, maxDate);
+  const outflowRows = includeDiscount ? makeHistoryRows(payload, "discount_outflow", selectedMonths, maxDate) : [];
   return <section className="overflow-hidden rounded-xl border border-border bg-surface">
-    <header className="border-b border-border px-4 py-3 sm:px-5"><h2 className="font-display text-base font-semibold text-text-primary">FY-wise KPI Summary</h2><p className="mt-1 text-xs text-text-muted">FY-wise monthly averages and discount outflow; only fiscal years with source data are listed. The prior FY includes LFYTD and full-year values</p></header>
-    <div className="grid gap-3 p-3 sm:p-4 xl:grid-cols-3">
+    <header className="border-b border-border px-4 py-3 sm:px-5"><h2 className="font-display text-base font-semibold text-text-primary">FY-wise KPI Summary</h2><p className="mt-1 text-xs text-text-muted">{includeDiscount ? "FY-wise monthly averages and discount outflow; only fiscal years with source data are listed. The prior FY includes LFYTD and full-year values" : "FY-wise monthly averages; only fiscal years with source data are listed. The prior FY includes LFYTD and full-year values"}</p></header>
+    <div className={"grid gap-3 p-3 sm:p-4 " + (includeDiscount ? "xl:grid-cols-3" : "xl:grid-cols-2")}>
       <HistorySection title="APM QTY" headers={["FY", "APM", "GROWTH VS PRIOR FY"]} rows={qtyRows} type="growth"/>
       <HistorySection title="APM VAL" headers={["FY", "APM", "GROWTH VS PRIOR FY"]} rows={valueRows} type="growth"/>
-      <HistorySection title="DISCOUNT OUTFLOW" headers={["FY", "DISCOUNT OUTFLOW %", "P.P CHANGE VS PRIOR FY"]} rows={outflowRows} type="outflow"/>
+      {includeDiscount && <HistorySection title="DISCOUNT OUTFLOW" headers={["FY", "DISCOUNT OUTFLOW %", "P.P CHANGE VS PRIOR FY"]} rows={outflowRows} type="outflow"/>}
     </div>
   </section>;
 }
@@ -208,9 +208,11 @@ const DIMENSION_LABELS = {
   store: { title: "Storewise Analysis", column: "STORE", search: "store" },
   department: { title: "Departmentwise Analysis", column: "DEPARTMENT", search: "department" },
   state: { title: "Statewise Analysis", column: "STATE", search: "state" },
+  store_type: { title: "Store Type Performance", column: "STORE TYPE", search: "store type" },
+  store_status: { title: "Store Status Performance", column: "STORE STATUS", search: "store status" },
 };
 
-export function MonthwiseDimensionTable({ payload, dimension, search, setSearch, selectedMonths = [], embedded = false }) {
+export function MonthwiseDimensionTable({ payload, dimension, search, setSearch, selectedMonths = [], embedded = false, includeDiscount = true }) {
   const [sorting, setSorting] = useState(null);
   const [openSort, setOpenSort] = useState(null);
   const anchor = payload?.anchor;
@@ -218,6 +220,7 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
   const years = availableFiscalYears(payload?.years, anchor);
   const totals = payload?.totals || {};
   const allRows = payload?.rows || [];
+  const historyMeasures = includeDiscount ? HISTORY_MEASURES : HISTORY_MEASURES.filter((metric) => metric.key === "qty" || metric.key === "val");
   const dimensionInfo = DIMENSION_LABELS[dimension] || { title: dimension, column: dimension, search: dimension.toLowerCase() };
   const rows = allRows.filter((row) => String(row.label).toLowerCase().includes(search.toLowerCase()));
   const selectedMonthCount = selectedMonths.length > 0 && selectedMonths.length < 12 ? selectedMonths.length : 0;
@@ -248,11 +251,11 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
     if (id === "label") return record.label;
     const parts = id.split("-");
     if (parts[0] === "year") {
-      const metric = HISTORY_MEASURES.find((item) => item.key === parts.slice(2).join("-")) || HISTORY_MEASURES[0];
+      const metric = historyMeasures.find((item) => item.key === parts.slice(2).join("-")) || historyMeasures[0];
       return valueAt(record, Number(parts[1]), metric);
     }
     if (parts[0] === "growth") {
-      const metric = HISTORY_MEASURES.find((item) => item.key === parts.slice(2).join("-")) || HISTORY_MEASURES[0];
+      const metric = historyMeasures.find((item) => item.key === parts.slice(2).join("-")) || historyMeasures[0];
       return growthAt(record, Number(parts[1]), metric);
     }
     return null;
@@ -269,11 +272,9 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
     if (metric.key === "discount_outflow") return <span className={outflowTone(value)}>{pointChange(value)}</span>;
     return <span className={growthTone(value)}>{(value > 0 ? "+" : "") + value.toFixed(1) + "%"}</span>;
   };
-  const growthMeasures = [
-    ["QTY GROWTH %", HISTORY_MEASURES[0]],
-    ["VALUE GROWTH %", HISTORY_MEASURES[4]],
-    ["DISCOUNT OUTFLOW P.P", HISTORY_MEASURES[3]],
-  ];
+  const growthMeasures = includeDiscount
+    ? [["QTY GROWTH %", historyMeasures[0]], ["VALUE GROWTH %", historyMeasures[4]], ["DISCOUNT OUTFLOW P.P", historyMeasures[3]]]
+    : [["QTY GROWTH %", historyMeasures[0]], ["VALUE GROWTH %", historyMeasures[1]]];
 
   return <section className={embedded ? "overflow-hidden" : "overflow-hidden rounded-xl border border-border bg-surface"}>
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
@@ -286,23 +287,23 @@ export function MonthwiseDimensionTable({ payload, dimension, search, setSearch,
           <tr>
             <th rowSpan="2" className="sticky left-0 z-40 min-w-[170px] border-b border-r border-border bg-base px-4 py-3 text-left">{header(dimensionInfo.column, "label", "left")}</th>
             {groups.map((group, index) => group.type === "year"
-              ? <th key={"year-" + group.year} colSpan={HISTORY_MEASURES.length} className={"border-b border-border px-3 py-2.5 text-center " + (group.year === years[0] ? "" : "border-l-2 border-border/70")}>{fyLabel(group.year)}</th>
+              ? <th key={"year-" + group.year} colSpan={historyMeasures.length} className={"border-b border-border px-3 py-2.5 text-center " + (group.year === years[0] ? "" : "border-l-2 border-border/70")}>{fyLabel(group.year)}</th>
               : <th key={"growth-" + index} colSpan={growthMeasures.length} className="border-b border-l-2 border-accent/40 bg-accent-soft/40 px-3 py-2.5 text-center text-accent">GROWTH</th>)}
           </tr>
           <tr>{groups.flatMap((group) => group.type === "year"
-            ? HISTORY_MEASURES.map((metric) => <th key={group.year + "-" + metric.key} className={"border-b border-border px-3 py-2 text-right " + (group.year === years[0] ? "" : metric === HISTORY_MEASURES[0] ? "border-l-2 border-border/70" : "")}>{header(metric.label, valueId(group.year, metric.key))}</th>)
+            ? historyMeasures.map((metric) => <th key={group.year + "-" + metric.key} className={"border-b border-border px-3 py-2 text-right " + (group.year === years[0] ? "" : metric === historyMeasures[0] ? "border-l-2 border-border/70" : "")}>{header(metric.label, valueId(group.year, metric.key))}</th>)
             : growthMeasures.map(([label, metric]) => <th key={group.year + "-" + metric.key} className="border-b border-l border-accent/20 bg-accent-soft/30 px-3 py-2 text-right">{header(label, changeId(group.year, metric.key))}</th>))}</tr>
         </thead>
         <tbody>{displayedRows.length ? displayedRows.map((row, index) => <tr key={row.label} className={"hover:bg-accent-soft/30 " + (index % 2 ? "bg-base/40" : "bg-surface")}>
           <th scope="row" className="sticky left-0 z-20 border-b border-r border-border bg-surface px-4 py-2.5 text-left font-semibold text-text-primary">{row.label}</th>
           {groups.flatMap((group) => group.type === "year"
-            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className={"whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary " + (group.year !== years[0] && metric === HISTORY_MEASURES[0] ? "border-l-2 border-border/70" : "")}>{renderValue(valueAt(row, group.year, metric), metric)}</td>)
+            ? historyMeasures.map((metric) => <td key={group.year + "-" + metric.key} className={"whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary " + (group.year !== years[0] && metric === historyMeasures[0] ? "border-l-2 border-border/70" : "")}>{renderValue(valueAt(row, group.year, metric), metric)}</td>)
             : growthMeasures.map(([, metric]) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-b border-l border-accent/20 px-3 py-2.5 text-right tabular-nums">{renderGrowth(growthAt(row, group.year, metric), metric)}</td>))}
-        </tr>) : <tr><td colSpan={1 + groups.reduce((sum, group) => sum + (group.type === "year" ? HISTORY_MEASURES.length : group.type === "gap" ? 1 : growthMeasures.length), 0)} className="px-4 py-10 text-center text-sm text-text-muted">No rows match these filters.</td></tr>}</tbody>
+        </tr>) : <tr><td colSpan={1 + groups.reduce((sum, group) => sum + (group.type === "year" ? historyMeasures.length : group.type === "gap" ? 1 : growthMeasures.length), 0)} className="px-4 py-10 text-center text-sm text-text-muted">No rows match these filters.</td></tr>}</tbody>
         {years.length > 0 && <tfoot><tr className="bg-surface font-bold text-text-primary">
           <th scope="row" className="sticky left-0 z-20 border-t-2 border-r border-accent bg-surface px-4 py-3 text-left">Grand Total</th>
           {groups.flatMap((group) => group.type === "year"
-            ? HISTORY_MEASURES.map((metric) => <td key={group.year + "-" + metric.key} className={"whitespace-nowrap border-t-2 border-accent px-3 py-3 text-right tabular-nums " + (group.year !== years[0] && metric === HISTORY_MEASURES[0] ? "border-l-2 border-border/70" : "")}>{renderValue(totalAt(group.year, metric), metric)}</td>)
+            ? historyMeasures.map((metric) => <td key={group.year + "-" + metric.key} className={"whitespace-nowrap border-t-2 border-accent px-3 py-3 text-right tabular-nums " + (group.year !== years[0] && metric === historyMeasures[0] ? "border-l-2 border-border/70" : "")}>{renderValue(totalAt(group.year, metric), metric)}</td>)
             : growthMeasures.map(([, metric]) => <td key={group.year + "-" + metric.key} className="whitespace-nowrap border-t-2 border-l border-accent/20 px-3 py-3 text-right tabular-nums">{renderGrowth(totalGrowthAt(group.year, metric), metric)}</td>))}
         </tr></tfoot>}
       </table>

@@ -74,6 +74,8 @@ export const sqlApi = {
 // Secondary Sales Analysis
 // ---------------------------------------------------------------------------
 export const secondaryApi = {
+    summaryConfig: (filters = {}) => http.post("/secondary/summary/config", { filters }).then((r) => r.data),
+    summary: (rowDimension, filters) => http.post("/secondary/summary", { row_dimension: rowDimension, filters }).then((r) => r.data),
   dimensions: () => http.get("/secondary/dimensions").then((r) => r.data),
   slicers: () => http.get("/secondary/slicers").then((r) => r.data),
   pivot: (dimensions, filters) =>

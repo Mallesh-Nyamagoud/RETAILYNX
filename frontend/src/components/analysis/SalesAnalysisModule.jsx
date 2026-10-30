@@ -56,13 +56,9 @@ export default function SalesAnalysisModule({
   monthwiseVariant = "columns",
   enableBillAnalysis = false,
   enableCategoryPerformance = false,
-  initialTab = "billing",
-  fixedDimensions = null,
-  hideTabs = false,
-  showPageHeader = true,
 }) {
-  const [tab, setTab] = useState(initialTab);
-  const [dimensions, setDimensions] = useState(fixedDimensions || []);
+  const [tab, setTab] = useState("billing");
+  const [dimensions, setDimensions] = useState([]);
   const [filters, setFilters] = useState({});
 
   const dimCatalogQ = useQuery({
@@ -105,12 +101,12 @@ export default function SalesAnalysisModule({
 
   return (
     <div>
-      {showPageHeader && <PageHeader
+      <PageHeader
         eyebrow={eyebrow}
         title={title}
         description={description}
         actions={<ExportButton onExport={handleExport} loading={exporting} />}
-      />}
+      />
 
       {fyContext && (
         <div className="flex items-center gap-4 mb-5 text-xs text-text-secondary flex-wrap">
@@ -130,7 +126,7 @@ export default function SalesAnalysisModule({
 
       <Card className="mb-5" padded>
         <div className="flex flex-col gap-4">
-          {!fixedDimensions && (dimCatalogQ.isLoading ? (
+          {dimCatalogQ.isLoading ? (
             <LoadingState rows={1} />
           ) : (
             <DimensionPicker
@@ -138,7 +134,7 @@ export default function SalesAnalysisModule({
               value={dimensions}
               onChange={setDimensions}
             />
-          ))}
+          )}
           {slicersQ.data?.slicers && (
             <FilterPanel
               slicers={slicersQ.data.slicers}
@@ -202,7 +198,7 @@ export default function SalesAnalysisModule({
       )}
 
       {/* Tabs */}
-      {!hideTabs && <div className="flex items-center gap-1 mb-4 border-b border-border">
+      <div className="flex items-center gap-1 mb-4 border-b border-border">
         {[
           { key: "billing", label: title, icon: BarChart3 },
           { key: "monthwise", label: "Monthwise Sales", icon: CalendarRange },
@@ -223,7 +219,7 @@ export default function SalesAnalysisModule({
             {t.label}
           </button>
         ))}
-      </div>}
+      </div>
 
       <Card padded={false} className="overflow-hidden">
         <div className="p-4">

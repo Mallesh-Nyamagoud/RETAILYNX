@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.routes.auth import get_current_user
 from app.models.schemas import ExportRequest, MonthwiseRequest, PivotRequest
-from app.services import analysis
+from app.services import analysis, secondary_summary
 from app.services.excel_export import build_workbook
 
 router = APIRouter(prefix="/secondary", tags=["secondary-sales-analysis"], dependencies=[Depends(get_current_user)])
@@ -18,6 +18,23 @@ FACT = analysis.FactSpec(
     val_expr="value - tax",
 )
 
+
+@router.get("/summary/config")
+def summary_config():
+    return secondary_summary.config()
+
+
+@router.post("/summary/config")
+def summary_config_filtered(req: dict):
+    return secondary_summary.config(req.get("filters", {}))
+
+
+@router.post("/summary")
+def summary(req: dict):
+    try:
+        return secondary_summary.report(req.get("row_dimension", "brand"), req.get("filters", {}))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/dimensions")
 def dimensions():

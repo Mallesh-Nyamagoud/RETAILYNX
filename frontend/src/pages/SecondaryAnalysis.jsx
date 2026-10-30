@@ -6,14 +6,13 @@ const MONTHWISE_MEASURES = [
   { key: "val", label: "Taxable Value" },
 ];
 
-export default function SecondaryAnalysis({ initialTab = "billing" }) {
+export default function SecondaryAnalysis() {
   return (
     <SalesAnalysisModule
       title="Secondary Billing Analysis"
       api={secondaryApi}
       monthwiseMeasureOptions={MONTHWISE_MEASURES}
       monthwiseDefaultMeasure="val"
-      initialTab={initialTab}
       valueUnitLabel="Taxable Value (₹)"
       valueUnitTag="₹ Taxable Value"
     />
