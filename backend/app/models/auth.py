@@ -26,11 +26,8 @@ class LoginRequest(BaseModel):
 
 class GoogleLoginRequest(BaseModel):
     credential: str = Field(min_length=1, max_length=8192)
-    full_name: str | None = Field(default=None, max_length=150)
-    organization: str | None = Field(default=None, max_length=150)
-    job_title: str | None = Field(default=None, max_length=120)
-    phone: str | None = Field(default=None, max_length=40)
-    access_reason: str | None = Field(default=None, max_length=500)
+    username: str | None = Field(default=None, max_length=150)
+    password: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class UserCreate(BaseModel):

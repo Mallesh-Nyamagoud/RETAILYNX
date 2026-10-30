@@ -6,7 +6,6 @@ import { useAuthStore } from "../store/useAuthStore";
 
 export default function Login() {
   const navigate = useNavigate();
-  const login = useAuthStore((s) => s.login);
   const googleLogin = useAuthStore((s) => s.googleLogin);
   const googleButton = useRef(null);
   const [googleConfig, setGoogleConfig] = useState(null);
@@ -16,7 +15,6 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [pendingGoogleCredential, setPendingGoogleCredential] = useState("");
   const [pendingGoogleEmail, setPendingGoogleEmail] = useState("");
-  const [professionalDetails, setProfessionalDetails] = useState({ full_name: "", organization: "", job_title: "", phone: "", access_reason: "" });
 
   useEffect(() => {
     let active = true;
@@ -41,7 +39,8 @@ export default function Login() {
             const encodedPayload = credential.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
             const tokenPayload = JSON.parse(atob(encodedPayload.padEnd(Math.ceil(encodedPayload.length / 4) * 4, "=")));
             const email = String(tokenPayload.email || "").toLowerCase();
-            if (email.split("@").pop() !== googleConfig.domain) {
+            const hostedDomain = String(tokenPayload.hd || "").toLowerCase();
+            if (email.split("@").pop() !== googleConfig.domain || hostedDomain !== googleConfig.domain) {
               setPendingGoogleCredential(credential);
               setPendingGoogleEmail(email);
             } else {
@@ -75,29 +74,15 @@ export default function Login() {
     return () => { active = false; };
   }, [googleConfig, googleLogin, navigate]);
 
-  const handleSubmit = async (e) => {
+  const handleExternalSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      await login(username.trim(), password);
+      await googleLogin(pendingGoogleCredential, { username: username.trim(), password });
       navigate("/", { replace: true });
     } catch (err) {
-      setError(err?.message || "Login failed. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleProfessionalSubmit = async (e) => {
-    e.preventDefault();
-    setError("");
-    setSubmitting(true);
-    try {
-      await googleLogin(pendingGoogleCredential, professionalDetails);
-      navigate("/", { replace: true });
-    } catch (err) {
-      setError(err?.message || "Google sign in failed. Please try again.");
+      setError(err?.message || "Account ID or password is incorrect.");
     } finally {
       setSubmitting(false);
     }
@@ -116,41 +101,27 @@ export default function Login() {
 
         {googleConfig && <>
           <div className="space-y-2 text-center">
-            <p className="text-xs text-text-muted">Sign in with Google. Non-company accounts must provide professional details.</p>
+            <p className="text-xs text-text-muted">Continue with your Google account</p>
             <div className="flex justify-center min-h-10" ref={googleButton} />
           </div>
-          <div className="flex items-center gap-3 text-[11px] text-text-muted"><span className="h-px flex-1 bg-border" /><span>OR USE YOUR APP ACCOUNT</span><span className="h-px flex-1 bg-border" /></div>
         </>}
 
-        {pendingGoogleCredential && <form onSubmit={handleProfessionalSubmit} className="space-y-4 rounded-lg border border-border bg-base/40 p-4">
-          <div><h2 className="text-sm font-semibold text-text-primary">Professional access details</h2><p className="mt-1 text-xs text-text-muted">Google account: {pendingGoogleEmail}</p></div>
-          {[
-            ["full_name", "Full name", "Your full name"],
-            ["organization", "Company / organization", "Your organization"],
-            ["job_title", "Job title", "Your role or designation"],
-            ["phone", "Contact number", "Your phone number"],
-          ].map(([key, label, placeholder]) => <div key={key} className="space-y-1.5">
-            <label className="text-xs font-medium text-text-muted">{label}</label>
-            <input required value={professionalDetails[key]} onChange={(e) => setProfessionalDetails((current) => ({ ...current, [key]: e.target.value }))} placeholder={placeholder} className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
-          </div>)}
-          <div className="space-y-1.5"><label className="text-xs font-medium text-text-muted">Reason for access</label><textarea required maxLength={500} value={professionalDetails.access_reason} onChange={(e) => setProfessionalDetails((current) => ({ ...current, access_reason: e.target.value }))} placeholder="Briefly describe why you need access" className="w-full min-h-20 bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" /></div>
-          <button type="submit" disabled={submitting} className="w-full bg-accent hover:bg-accent-hover text-white py-3 px-4 rounded-lg font-semibold disabled:opacity-60">{submitting ? "Signing in..." : "Continue with Google"}</button>
-        </form>}
+        {error && <p role="alert" className="text-center text-xs text-negative">{error}</p>}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {pendingGoogleCredential && <form onSubmit={handleExternalSubmit} className="space-y-4 rounded-lg border border-border bg-base/40 p-4">
+          <div><h2 className="text-sm font-semibold text-text-primary">RETAILYNX account required</h2><p className="mt-1 text-xs text-text-muted">{pendingGoogleEmail} is outside {googleConfig.domain}. Enter your RETAILYNX account ID and password to continue.</p></div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-muted">Username</label>
-            <input type="text" required autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="your username" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
+            <label className="text-xs font-medium text-text-muted">Account ID</label>
+            <input type="text" required autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Your RETAILYNX account ID" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-text-muted">Password</label>
-            <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
+            <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your RETAILYNX password" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
           </div>
-          {error && <p className="text-xs text-negative">{error}</p>}
           <button type="submit" disabled={submitting} className="w-full flex items-center justify-center gap-3 bg-accent hover:bg-accent-hover text-white py-3 px-4 rounded-lg font-semibold transition-colors shadow-sm disabled:opacity-60">
             <LogIn size={18} />{submitting ? "Signing in..." : "Sign In"}
           </button>
-        </form>
+        </form>}
       </div>
     </div>
   );

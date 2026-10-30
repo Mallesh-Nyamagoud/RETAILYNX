@@ -125,21 +125,19 @@ def google_login(payload: GoogleLoginRequest, response: Response) -> dict:
         hosted_domain == GOOGLE_WORKSPACE_DOMAIN
         and email.rsplit("@", 1)[-1] == GOOGLE_WORKSPACE_DOMAIN
     )
-    professional_details = {
-        "full_name": (payload.full_name or "").strip(),
-        "organization": (payload.organization or "").strip(),
-        "job_title": (payload.job_title or "").strip(),
-        "phone": (payload.phone or "").strip(),
-        "access_reason": (payload.access_reason or "").strip(),
-    }
-    if not is_company_account and not all(professional_details.values()):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Complete all professional details to continue with a non-company Google account",
-        )
+    if is_company_account:
+        user = auth_service.get_user_by_google_sub(google_sub)
+    else:
+        if not payload.username or not payload.password:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Enter your RETAILYNX account ID and password for a non-company Google account",
+            )
+        user = auth_service.authenticate(payload.username, payload.password)
+        if user is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid account ID or password")
 
-    user = auth_service.get_user_by_google_sub(google_sub)
-    if user is None:
+    if is_company_account and user is None:
         # Workspace verified email is authoritative; link a pre-existing local
         # account by email so its role and permissions remain intact.
         user = auth_service.get_user_by_username(email)
@@ -164,9 +162,8 @@ def google_login(payload: GoogleLoginRequest, response: Response) -> dict:
     auth_service.start_usage_session(
         session_id,
         user,
-        auth_method="google",
+        auth_method="google" if is_company_account else "google+password",
         google_email=email,
-        professional_details=professional_details if not is_company_account else None,
     )
     _set_session_cookie(response, user["id"], session_id)
     return user

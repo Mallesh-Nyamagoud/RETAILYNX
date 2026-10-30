@@ -79,21 +79,20 @@ export default function AdminOverview() {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-base/50 text-[11px] uppercase tracking-wider text-text-muted">
-              <tr><th className="px-5 py-3">Account</th><th className="px-5 py-3">Google email</th><th className="px-5 py-3">Professional details</th><th className="px-5 py-3">Method</th><th className="px-5 py-3">Login time</th><th className="px-5 py-3">Logout time</th><th className="px-5 py-3">Time used</th><th className="px-5 py-3 text-right">Interactions</th><th className="px-5 py-3">Status</th></tr>
+              <tr><th className="px-5 py-3">Account</th><th className="px-5 py-3">Google email</th><th className="px-5 py-3">Method</th><th className="px-5 py-3">Login time</th><th className="px-5 py-3">Logout time</th><th className="px-5 py-3">Time used</th><th className="px-5 py-3 text-right">Interactions</th><th className="px-5 py-3">Status</th></tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {sessions.map((session) => <tr key={session.id} className="hover:bg-card-hover/40">
                 <td className="px-5 py-3 font-medium text-text-primary">{session.username}</td>
                 <td className="px-5 py-3 text-text-secondary">{session.google_email || "?"}</td>
-                <td className="px-5 py-3 text-text-secondary">{session.professional_name ? <div><div className="font-medium text-text-primary">{session.professional_name}</div><div>{session.organization} / {session.job_title}</div><div>{session.phone}</div><div className="max-w-sm whitespace-normal text-xs text-text-muted">{session.access_reason}</div></div> : "?"}</td>
-                <td className="px-5 py-3 text-text-secondary capitalize">{session.auth_method || "password"}</td>
+                <td className="px-5 py-3 text-text-secondary capitalize">{session.auth_method === "google+password" ? "Google + RETAILYNX password" : session.auth_method || "password"}</td>
                 <td className="px-5 py-3 text-text-secondary">{stamp(session.login_at)}</td>
                 <td className="px-5 py-3 text-text-secondary">{stamp(session.logout_at)}</td>
                 <td className="px-5 py-3 text-text-secondary">{duration(session.duration_seconds)}</td>
                 <td className="px-5 py-3 text-right tabular-nums text-text-secondary">{session.interaction_count}</td>
                 <td className="px-5 py-3"><span className={`px-2 py-1 rounded-full text-[11px] font-semibold ${session.is_active ? "bg-positive-soft text-positive" : "bg-base text-text-muted"}`}>{session.is_active ? "Active" : "Signed out"}</span></td>
               </tr>)}
-              {!sessions.length && <tr><td colSpan={9} className="px-5 py-8 text-center text-text-muted">{isLoading ? "Loading activity…" : "No login activity recorded yet."}</td></tr>}
+              {!sessions.length && <tr><td colSpan={8} className="px-5 py-8 text-center text-text-muted">{isLoading ? "Loading activity…" : "No login activity recorded yet."}</td></tr>}
             </tbody>
           </table>
         </div>
