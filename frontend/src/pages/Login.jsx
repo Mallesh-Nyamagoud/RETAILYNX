@@ -1,88 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LogIn } from "lucide-react";
-import { http } from "../api/client";
 import { useAuthStore } from "../store/useAuthStore";
 
 export default function Login() {
   const navigate = useNavigate();
-  const googleLogin = useAuthStore((s) => s.googleLogin);
-  const googleButton = useRef(null);
-  const [googleConfig, setGoogleConfig] = useState(null);
+  const login = useAuthStore((s) => s.login);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [pendingGoogleCredential, setPendingGoogleCredential] = useState("");
-  const [pendingGoogleEmail, setPendingGoogleEmail] = useState("");
 
-  useEffect(() => {
-    let active = true;
-    http.get("/auth/google/config").then(({ data }) => {
-      if (active && data.client_id) setGoogleConfig(data);
-    }).catch(() => {});
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    if (!googleConfig?.client_id || !googleButton.current) return undefined;
-    let active = true;
-    const renderButton = () => {
-      if (!active || !window.google?.accounts?.id || !googleButton.current) return;
-      window.google.accounts.id.initialize({
-        client_id: googleConfig.client_id,
-        callback: async ({ credential }) => {
-          if (!credential) return;
-          setError("");
-          setSubmitting(true);
-          try {
-            const encodedPayload = credential.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-            const tokenPayload = JSON.parse(atob(encodedPayload.padEnd(Math.ceil(encodedPayload.length / 4) * 4, "=")));
-            const email = String(tokenPayload.email || "").toLowerCase();
-            const hostedDomain = String(tokenPayload.hd || "").toLowerCase();
-            if (email.split("@").pop() !== googleConfig.domain || hostedDomain !== googleConfig.domain) {
-              setPendingGoogleCredential(credential);
-              setPendingGoogleEmail(email);
-            } else {
-              await googleLogin(credential);
-              navigate("/", { replace: true });
-            }
-          } catch (err) {
-            setError(err?.message || `Sign in with your ${googleConfig.domain} account failed.`);
-          } finally {
-            setSubmitting(false);
-          }
-        },
-      });
-      window.google.accounts.id.renderButton(googleButton.current, {
-        type: "standard", theme: "outline", size: "large", text: "signin_with",
-        shape: "rectangular", width: 360,
-      });
-    };
-    if (window.google?.accounts?.id) renderButton();
-    else {
-      let script = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
-      if (!script) {
-        script = document.createElement("script");
-        script.src = "https://accounts.google.com/gsi/client";
-        script.async = true;
-        script.defer = true;
-        document.head.appendChild(script);
-      }
-      script.addEventListener("load", renderButton, { once: true });
-    }
-    return () => { active = false; };
-  }, [googleConfig, googleLogin, navigate]);
-
-  const handleExternalSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      await googleLogin(pendingGoogleCredential, { username: username.trim(), password });
+      await login(username.trim(), password);
       navigate("/", { replace: true });
     } catch (err) {
-      setError(err?.message || "Account ID or password is incorrect.");
+      setError(err?.message || "Username or password is incorrect.");
     } finally {
       setSubmitting(false);
     }
@@ -98,30 +35,20 @@ export default function Login() {
           <h1 className="text-3xl font-display font-bold text-text-primary tracking-wide">RETAILYNX</h1>
           <p className="text-text-secondary font-medium">Retail Intelligence &amp; Analysis Platform</p>
         </div>
-
-        {googleConfig && <>
-          <div className="space-y-2 text-center">
-            <p className="text-xs text-text-muted">Continue with your Google account</p>
-            <div className="flex justify-center min-h-10" ref={googleButton} />
-          </div>
-        </>}
-
         {error && <p role="alert" className="text-center text-xs text-negative">{error}</p>}
-
-        {pendingGoogleCredential && <form onSubmit={handleExternalSubmit} className="space-y-4 rounded-lg border border-border bg-base/40 p-4">
-          <div><h2 className="text-sm font-semibold text-text-primary">RETAILYNX account required</h2><p className="mt-1 text-xs text-text-muted">{pendingGoogleEmail} is outside {googleConfig.domain}. Enter your RETAILYNX account ID and password to continue.</p></div>
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-muted">Account ID</label>
-            <input type="text" required autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Your RETAILYNX account ID" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
+            <label htmlFor="username" className="text-xs font-medium text-text-muted">Username</label>
+            <input id="username" type="text" required autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Your username" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-muted">Password</label>
-            <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your RETAILYNX password" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
+            <label htmlFor="password" className="text-xs font-medium text-text-muted">Password</label>
+            <input id="password" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" className="w-full bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent" />
           </div>
           <button type="submit" disabled={submitting} className="w-full flex items-center justify-center gap-3 bg-accent hover:bg-accent-hover text-white py-3 px-4 rounded-lg font-semibold transition-colors shadow-sm disabled:opacity-60">
             <LogIn size={18} />{submitting ? "Signing in..." : "Sign In"}
           </button>
-        </form>}
+        </form>
       </div>
     </div>
   );
