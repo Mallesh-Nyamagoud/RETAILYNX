@@ -315,17 +315,23 @@ export default function TertiaryMonthwiseTable({ result }) {
   const [sorting, setSorting] = useState({ id: "month_order", direction: "asc" });
   const [openSort, setOpenSort] = useState(null);
   const rows = result?.rows || [];
+  const fy = result?.fy_context || {};
+  const currentYear = fy.current_fy_start ? Number(String(fy.current_fy_start).slice(0, 4)) : null;
+  const historicalYears = (result?.fiscal_years || []).map(Number)
+    .filter((year) => Number.isFinite(year) && currentYear != null && year < currentYear - 1);
   const sorted = useMemo(() => rows.map((row) => ({
     ...row,
+    ...Object.fromEntries(historicalYears.map((year) => [
+      `fy_${year}_discount_pct`, ratio(row[`fy_${year}_discount`], row[`fy_${year}_mrp_value`]),
+    ])),
     discount_pct_ly: ratio(row.discount_ly, row.mrp_value_ly),
     discount_outflow_pp: ratio(row.discount, row.mrp_value) == null || ratio(row.discount_ly, row.mrp_value_ly) == null
       ? null
       : ratio(row.discount, row.mrp_value) - ratio(row.discount_ly, row.mrp_value_ly),
-  })), [rows]);
+  })), [rows, historicalYears]);
   const sortedRows = useMemo(() => sortedRowsByColumn(sorted, sorting), [sorted, sorting]);
   const totals = useMemo(() => summarizeMonthwise(rows), [rows]);
   const sum = (key) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
-  const fy = result?.fy_context || {};
   const changeSort = (id, direction) => { setSorting({ id, direction }); setOpenSort(null); };
   const header = (label, id, align) => <SortHeader label={label} id={id} sorting={sorting} open={openSort === id} onToggle={() => setOpenSort((current) => current === id ? null : id)} onSort={changeSort} align={align}/>;
   const renderMeasure = (row, measure, previous) => measure.key === "discount_pct"
@@ -334,6 +340,10 @@ export default function TertiaryMonthwiseTable({ result }) {
   const cell = (row, measure, previous, key) => {
     const value = renderMeasure(row, measure, previous);
     return <td key={key} className="whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary">{value == null ? <span className="text-text-muted">—</span> : measure.format(value)}</td>;
+  };
+  const historicalCell = (row, year, measure) => {
+    const value = row[`fy_${year}_${measure.key}`];
+    return <td key={`fy-${year}-${measure.key}`} className="whitespace-nowrap border-b border-border px-3 py-2.5 text-right tabular-nums text-text-primary">{value == null ? <span className="text-text-muted">?</span> : measure.format(value)}</td>;
   };
   const growthCells = (row) => {
     const outflowChange = row.discount_outflow_pp;
@@ -348,10 +358,11 @@ export default function TertiaryMonthwiseTable({ result }) {
 
   return <div className="overflow-hidden rounded-xl border border-border">
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1500px] border-separate border-spacing-0 text-xs">
+      <table style={{ minWidth: 1500 + historicalYears.length * 520 }} className="w-full border-separate border-spacing-0 text-xs">
         <thead className="sticky top-0 z-30 bg-base text-[10px] font-bold uppercase tracking-wide text-text-secondary">
           <tr>
             <th rowSpan="2" className="sticky left-0 z-40 w-[144px] min-w-[144px] border-b border-r border-border bg-base px-4 py-3 text-left">{header("MONTH", "month_order", "left")}</th>
+            {historicalYears.map((year) => <th key={year} colSpan={MEASURES.length} className="border-b border-border px-3 py-2.5 text-center">{fyLabel(year)}</th>)}
             <th colSpan="5" className="border-b border-border px-3 py-2.5 text-center">{fy.last_fy_label || "LAST FY"}</th>
             <th rowSpan="2" aria-hidden="true" className="w-6 min-w-6 border-none bg-base p-0"><span className="sr-only">Fiscal year section gap</span></th>
             <th colSpan="5" className="border-b border-border px-3 py-2.5 text-center">{fy.current_fy_label || "CURRENT FY"}</th>
@@ -359,6 +370,7 @@ export default function TertiaryMonthwiseTable({ result }) {
             <th colSpan="3" className="border-b border-l-2 border-accent/40 bg-accent-soft/40 px-3 py-2.5 text-center text-accent">GROWTH</th>
           </tr>
           <tr>
+            {historicalYears.flatMap((year) => MEASURES.map((measure) => <th key={`fy-${year}-${measure.key}`} className="border-b border-border px-3 py-2 text-right">{header(measure.label, `fy_${year}_${measure.key}`)}</th>))}
             {MEASURES.map((measure) => <th key={"last-" + measure.key} className="border-b border-border px-3 py-2 text-right">{header(measure.label, measure.key + "_ly")}</th>)}
             {MEASURES.map((measure) => <th key={"current-" + measure.key} className="border-b border-border px-3 py-2 text-right">{header(measure.label, measure.key)}</th>)}
             {[["QTY GROWTH %", "qty_growth_pct"], ["VALUE GROWTH %", "bill_val_growth_pct"], ["DISCOUNT OUTFLOW P.P", "discount_outflow_pp"]].map(([label, key]) => <th key={key} className="border-b border-l border-accent/20 bg-accent-soft/30 px-3 py-2 text-right">{header(label, key)}</th>)}
@@ -366,14 +378,21 @@ export default function TertiaryMonthwiseTable({ result }) {
         </thead>
         <tbody>{sortedRows.length ? sortedRows.map((row, index) => <tr key={row.month} className={"hover:bg-accent-soft/30 " + (index % 2 ? "bg-base/40" : "bg-surface")}>
           <th scope="row" className="sticky left-0 z-20 w-[144px] min-w-[144px] border-b border-r border-border bg-surface px-4 py-2.5 text-left font-semibold uppercase text-text-primary shadow-md">{row.month}</th>
+          {historicalYears.flatMap((year) => MEASURES.map((measure) => historicalCell(row, year, measure)))}
           {MEASURES.map((measure) => cell(row, measure, true, "last-" + measure.key))}
           <td aria-hidden="true" className="w-6 min-w-6 border-none bg-base p-0"></td>
           {MEASURES.map((measure) => cell(row, measure, false, "current-" + measure.key))}
           <td aria-hidden="true" className="w-10 min-w-10 border-none bg-base p-0"></td>
           {growthCells(row)}
-        </tr>) : <tr><td colSpan="16" className="px-4 py-10 text-center text-sm text-text-muted">No monthwise data for these filters.</td></tr>}</tbody>
+        </tr>) : <tr><td colSpan={16 + historicalYears.length * MEASURES.length} className="px-4 py-10 text-center text-sm text-text-muted">No monthwise data for these filters.</td></tr>}</tbody>
         {rows.length > 0 && <tfoot><tr className="bg-surface font-bold text-text-primary">
           <th scope="row" className="sticky left-0 z-20 w-[144px] min-w-[144px] border-t-2 border-r border-accent bg-surface px-4 py-3 text-left shadow-md">Grand Total</th>
+          {historicalYears.flatMap((year) => MEASURES.map((measure) => {
+            const value = measure.key === "discount_pct"
+              ? ratio(sum(`fy_${year}_discount`), sum(`fy_${year}_mrp_value`))
+              : (rows.some((row) => row[`fy_${year}_${measure.key}`] != null) ? sum(`fy_${year}_${measure.key}`) : null);
+            return <td key={`total-fy-${year}-${measure.key}`} className="whitespace-nowrap border-t-2 border-border px-3 py-3 text-right tabular-nums">{value == null ? "?" : measure.format(value)}</td>;
+          }))}
           {MEASURES.map((measure) => {
             const value = measure.key === "discount_pct" ? ratio(sum("discount_ly"), sum("mrp_value_ly")) : (rows.some((row) => row[measure.key + "_ly"] != null) ? sum(measure.key + "_ly") : null);
             return <td key={"total-last-" + measure.key} className="whitespace-nowrap border-t-2 border-accent px-3 py-3 text-right tabular-nums">{value == null ? "—" : measure.format(value)}</td>;

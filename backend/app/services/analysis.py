@@ -157,6 +157,19 @@ def _global_max_date_cached(fact: FactSpec, _token: tuple) -> date | None:
     return val.date() if hasattr(val, "date") else val
 
 
+def _get_global_min_date(fact: FactSpec) -> date | None:
+    return _global_min_date_cached(fact, cache_token())
+
+
+@lru_cache(maxsize=8)
+def _global_min_date_cached(fact: FactSpec, _token: tuple) -> date | None:
+    row = execute(f"SELECT MIN({quote_ident(fact.date_column)}) FROM {fact.schema}.{fact.table}")
+    val = row[0][0] if row else None
+    if val is None:
+        return None
+    return val.date() if hasattr(val, "date") else val
+
+
 def _fiscal_month_index(m: int) -> int:
     """Map a calendar month to its index inside the FY (April=1 ... March=12)."""
     if m >= FY_START_MONTH:
@@ -787,14 +800,18 @@ def _monthwise_rows_cached(
     )
 
     max_date = _get_global_max_date(fact)
-    if max_date is None:
-        return {"rows": [], "months": [], "dimensions": dims, "measure_keys": [m["key"] for m in measures], "ratio_keys": [m["key"] for m in ratio_measures], "growth_keys": growth_keys, "fy_context": None}
+    min_date = _get_global_min_date(fact)
+    if max_date is None or min_date is None:
+        return {"rows": [], "months": [], "fiscal_years": [], "dimensions": dims, "measure_keys": [m["key"] for m in measures], "ratio_keys": [m["key"] for m in ratio_measures], "growth_keys": growth_keys, "fy_context": None}
     current_fy = max_date.year if max_date.month >= FY_START_MONTH else max_date.year - 1
     anchor_fy = max(selected_fys) if selected_fys else current_fy
     # Use the selected fiscal year as the comparison anchor. A historical
     # selection is a completed year; the live FY retains its actual max date.
     anchor_max_date = max_date if anchor_fy >= current_fy else date(anchor_fy + 1, 3, 31)
     fy = build_fy_context(anchor_max_date)
+    first_fy = min_date.year if min_date.month >= FY_START_MONTH else min_date.year - 1
+    fiscal_years = list(range(first_fy, anchor_fy + 1))
+    first_fy_start = date(first_fy, FY_START_MONTH, 1)
     month_filter = ""
     if selected_months:
         month_filter = " AND month(f." + quote_ident(fact.date_column) + ") IN (" + ",".join("?" for _ in selected_months) + ")"
@@ -821,9 +838,11 @@ def _monthwise_rows_cached(
     FROM dim_joined
     GROUP BY {(dim_group_internal + ",") if dims else ""} fy_bucket, cal_year, cal_month
     """
-    params = filter_params + [fy.last_fy_start, fy.current_fy_end] + selected_months + [fy.current_fy_start]
+    params = filter_params + [first_fy_start, fy.current_fy_end] + selected_months + [fy.current_fy_start]
     df = execute_df(sql, params)
     df = df.rename(columns={f"dim__{d}": d for d in dims})
+    if not df.empty:
+        df["fiscal_year_start"] = df["cal_year"] - (df["cal_month"] < FY_START_MONTH).astype(int)
 
     months_seq = _fy_month_sequence(fy)
     if selected_months:
@@ -831,6 +850,8 @@ def _monthwise_rows_cached(
         months_seq = [month for month in months_seq if month["cal_month"] in selected_month_set]
     measure_keys = [m["key"] for m in measures]
     value_key = growth_keys[0] if growth_keys else measure_keys[-1]
+    if df.empty:
+        return {"rows": [], "months": months_seq_public(months_seq), "fiscal_years": fiscal_years, "dimensions": dims, "measure_keys": measure_keys, "ratio_keys": [rm["key"] for rm in ratio_measures], "growth_keys": growth_keys, "fy_context": fy.to_dict()}
 
     rows: list[dict] = []
     group_cols = dims
@@ -880,6 +901,20 @@ def _monthwise_rows_cached(
             row = dict(base)
             row["month_order"] = _fiscal_month_index(m["cal_month"])
             row["month"] = _month_full_name(m["cal_month"])
+            # Include the value for this month in every available fiscal year.
+            for year in fiscal_years:
+                month_num = m["cal_month"]
+                year_mask = (sub["fiscal_year_start"] == year) & (sub["cal_month"] == month_num)
+                calendar_year = year if month_num >= FY_START_MONTH else year + 1
+                future_month = year == anchor_fy and date(calendar_year, month_num, 1) > fy.max_date
+                for mk in measure_keys:
+                    row_key = f"fy_{year}_{mk}"
+                    row[row_key] = None if future_month else (
+                        float(sub.loc[year_mask, mk].sum()) if year_mask.any() else 0.0
+                    )
+                row[f"fy_{year}_discount_pct"] = (
+                    None if future_month else safe_pct(row.get(f"fy_{year}_discount"), row.get(f"fy_{year}_mrp_value"))
+                )
             for mk in measure_keys:
                 row[mk] = cfy_vals[mk]
                 row[f"{mk}_ly"] = lfy_vals[mk]
@@ -910,6 +945,7 @@ def _monthwise_rows_cached(
     return {
         "rows": rows,
         "months": months_seq_public(months_seq),
+        "fiscal_years": fiscal_years,
         "dimensions": dims,
         "measure_keys": measure_keys,
         "ratio_keys": [rm["key"] for rm in ratio_measures],
