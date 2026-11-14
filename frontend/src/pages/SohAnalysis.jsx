@@ -173,7 +173,6 @@ export default function SohAnalysis() {
           onChange={(e) => setEnding(e.target.value)}>{validEnds.map((date) => <option key={date} value={date}>{date}</option>)}</select></label>
       </div></Card>
       {exportError && <p role="alert" className="text-sm text-red-500">{exportError}</p>}
-      {(q.data?.warnings || []).map((warning) => <p key={warning} role="status" className="rounded border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">{warning}</p>)}
       {(q.isError && q.data) || sourceRefreshFailed ? <p role="alert" className="text-sm text-red-500">A refresh failed; showing the last loaded SOH results.</p> : null}
       {datesQ.isLoading || q.isLoading ? <Card><LoadingState label="Loading SOH analysis" rows={6} /></Card>
         : sourceError ? <Card><ErrorState message={sourceError.message} onRetry={() => datesQ.refetch()} /></Card>
@@ -199,9 +198,24 @@ export default function SohAnalysis() {
               <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap font-semibold hover:text-accent" onClick={() => toggleSort(key)}>{label}{sort.key === key ? (sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ChevronDown size={12} className="opacity-30" />}</button>
             </th>)}</tr><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2" style={frozenColumnStyle(key, true)} key={key}>
               {key === "st_pct" || key === "opening_soh_clearance" ? (
-                <div className="flex min-w-36 gap-1">
-                  <input aria-label={`Minimum ${label}`} type="number" step="0.1" placeholder="Min %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.min ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], min: e.target.value } }))} />
-                  <input aria-label={`Maximum ${label}`} type="number" step="0.1" placeholder="Max %" className="w-1/2 min-w-16 rounded border border-border bg-base px-2 py-1 text-xs font-normal" value={rangeFilters[key]?.max ?? ""} onChange={(e) => setRangeFilters((current) => ({ ...current, [key]: { ...current[key], max: e.target.value } }))} />
+                <div className="min-w-44 px-1">
+                  {(() => {
+                    const range = rangeFilters[key] || {};
+                    const min = Number.isFinite(Number(range.min)) && range.min !== "" ? Number(range.min) : 0;
+                    const max = Number.isFinite(Number(range.max)) && range.max !== "" ? Number(range.max) : 100;
+                    const update = (edge, value) => setRangeFilters((current) => {
+                      const prior = current[key] || {};
+                      const next = edge === "min" ? Math.min(Number(value), Number(prior.max ?? 100)) : Math.max(Number(value), Number(prior.min ?? 0));
+                      return { ...current, [key]: { ...prior, [edge]: next } };
+                    });
+                    return <>
+                      <div className="mb-1 flex justify-between text-[10px] font-medium text-text-muted"><span>{min.toFixed(1)}%</span><span>{max.toFixed(1)}%</span></div>
+                      <div className="flex items-center gap-1">
+                        <input aria-label={`Minimum ${label}`} type="range" min="0" max="100" step="0.1" value={min} onChange={(e) => update("min", e.target.value)} className="h-1.5 min-w-0 flex-1 accent-sky-400" />
+                        <input aria-label={`Maximum ${label}`} type="range" min="0" max="100" step="0.1" value={max} onChange={(e) => update("max", e.target.value)} className="h-1.5 min-w-0 flex-1 accent-sky-400" />
+                      </div>
+                    </>;
+                  })()}
                 </div>
               ) : (
                 <ColumnMultiFilter label={label} options={filterOptions[key] || []} selected={columnSelections[key] || []} onChange={(selected) => setColumnSelections((current) => ({ ...current, [key]: selected }))} />

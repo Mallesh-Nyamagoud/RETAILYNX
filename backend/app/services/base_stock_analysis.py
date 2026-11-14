@@ -37,7 +37,9 @@ def get_dimensions() -> list[dict]:
 def get_slicers() -> dict[str, list[str]]:
     available = analysis.get_slicer_options()
     result = {column: available.get(column, []) for column in STORE_FILTER_COLUMNS if column in available}
-    result.update(_product_slicer_options(cache_token()))
+    soh_stat = SOH_DB.stat() if SOH_DB.exists() else None
+    product_token = (*cache_token(), soh_stat.st_mtime_ns if soh_stat else None, soh_stat.st_size if soh_stat else None)
+    result.update(_product_slicer_options(product_token))
     return result
 
 
@@ -49,12 +51,21 @@ def _product_slicer_options(_token: tuple) -> dict[str, list[str]]:
         FROM tertiary_data.data
         WHERE "CG" IS NOT NULL OR "SEASON" IS NOT NULL
     """)
-    if rows.empty:
-        return {"category_group": [], "season": []}
-    return {
-        column: sorted(rows[column].dropna().astype(str).loc[lambda values: values.str.len() > 0].unique().tolist())
-        for column in PRODUCT_FILTER_COLUMNS
+    result = {
+        "category_group": sorted(rows["category_group"].dropna().astype(str).loc[lambda values: values.str.len() > 0].unique().tolist()) if not rows.empty else [],
+        "season": [],
     }
+    if SOH_DB.exists():
+        with duckdb.connect(str(SOH_DB), read_only=True) as con:
+            columns = [row[0] for row in con.execute("DESCRIBE data").fetchall()]
+            season_column = _find_source_column(columns, "season", "season_name")
+            if season_column:
+                result["season"] = [row[0] for row in con.execute(
+                    f"SELECT DISTINCT TRIM(CAST({quote_ident(season_column)} AS VARCHAR)) "
+                    f"FROM data WHERE {quote_ident(season_column)} IS NOT NULL "
+                    f"AND TRIM(CAST({quote_ident(season_column)} AS VARCHAR)) <> '' ORDER BY 1"
+                ).fetchall()]
+    return result
 
 
 def _norm(value) -> str:
@@ -323,6 +334,9 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
     combined["total_sales"] = pd.to_numeric(combined["total_sales"], errors="coerce").fillna(0)
     combined["last_6m_sales"] = pd.to_numeric(combined["last_6m_sales"], errors="coerce").fillna(0)
     combined["current_stock"] = pd.to_numeric(combined["current_stock"], errors="coerce").fillna(0)
+    is_promo = combined["category"].fillna("").astype(str).str.contains(r"\bpromo\b", case=False, regex=True)
+    promo_rows = combined.loc[is_promo].copy()
+    combined = combined.loc[~is_promo].copy()
     combined["total_sales_contribution_pct"] = combined["total_sales"].map(lambda value: safe_pct(value, combined["total_sales"].sum()))
     combined["last_6m_contribution_pct"] = combined["last_6m_sales"].map(lambda value: safe_pct(value, combined["last_6m_sales"].sum()))
     combined["current_stock_contribution_pct"] = combined["current_stock"].map(lambda value: safe_pct(value, combined["current_stock"].sum()))
@@ -332,6 +346,7 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
     combined = combined.drop(columns=["_category_key"], errors="ignore")
     return {
         "rows": combined.to_dict("records"),
+        "promo_rows": promo_rows.to_dict("records"),
         "warnings": warnings,
         "tertiary_as_of": sales_as_of.isoformat(),
         "last_6m_start": six_month_start.isoformat(),

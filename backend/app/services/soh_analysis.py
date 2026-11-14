@@ -9,10 +9,10 @@ from difflib import SequenceMatcher
 import duckdb
 import pandas as pd
 
-from app.core.config import BACKEND_DIR
+from app.core.config import DATA_DIR
 from app.core.database import execute_df
 
-SOH_DB = BACKEND_DIR / "data" / "soh_data_src.duckdb"
+SOH_DB = DATA_DIR / "soh_data_src.duckdb"
 log = logging.getLogger(__name__)
 FILTER_FIELDS = {
     "store": "name",

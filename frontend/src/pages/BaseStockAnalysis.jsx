@@ -36,11 +36,21 @@ function showPercent(value) {
   return PERCENT.format(Number(value) || 0) + "%";
 }
 
+function fiscalYearLabel(value) {
+  if (!value) return "";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const startYear = date.getMonth() >= 3 ? year : year - 1;
+  return `FY${startYear}-${String(startYear + 1).slice(-2)}`;
+}
+
 export default function BaseStockAnalysis() {
   const [dimensions, setDimensions] = useState(["category_group", "category", "subcategory"]);
   const [filters, setFilters] = useState({});
   const [queryFilters, setQueryFilters] = useState({});
   const [sort, setSort] = useState({ key: "total_sales_contribution_pct", direction: "desc" });
+  const [showPromo, setShowPromo] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(() => setQueryFilters(filters), 350);
     return () => window.clearTimeout(timer);
@@ -136,10 +146,6 @@ export default function BaseStockAnalysis() {
         </div>
       )}
 
-      {(analysisQ.data?.warnings || []).map((warning) => (
-        <p key={warning} role="status" className="rounded border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">{warning}</p>
-      ))}
-
       {analysisQ.isLoading ? (
         <Card><LoadingState label="Loading base stock analysis" rows={8} /></Card>
       ) : analysisQ.isError ? (
@@ -153,7 +159,7 @@ export default function BaseStockAnalysis() {
               <h2 className="text-sm font-semibold text-text-primary">Category Stock Position {analysisQ.isFetching && <span className="ml-2 text-xs font-normal text-text-muted">Updating…</span>}</h2>
               <p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString()} rows | sorted by {sortLabel} ({sort.direction === "desc" ? "highest first" : "lowest first"})</p>
             </div>
-            <p className="text-xs text-text-muted">F4M = (Last 6M Sales / 6) * 4</p>
+            <div className="flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full border border-border bg-surface px-3 py-1 font-semibold text-text-secondary">Current FY: {fiscalYearLabel(analysisQ.data?.tertiary_as_of) || "Unavailable"}</span><span className="text-text-muted">F4M = (Last 6M Sales / 6) * 4</span></div>
           </div>
           <div className="max-h-[70vh] min-h-[360px] overflow-auto rounded-xl border border-border bg-card">
             <table className="w-full min-w-[1500px] text-sm">
@@ -198,6 +204,19 @@ export default function BaseStockAnalysis() {
             </table>
           </div>
           <p className="mt-3 text-xs text-text-muted">ST% = Last 6M Sales / Current Stock. Stock - F4M Requirement is positive when stock is above four-month demand and negative when it is below.</p>
+          {(analysisQ.data?.promo_rows || []).length > 0 && <div className="mt-4 overflow-hidden rounded-lg border border-border/80">
+            <button type="button" aria-expanded={showPromo} onClick={() => setShowPromo((value) => !value)} className="flex w-full items-center justify-between gap-3 bg-surface/70 px-4 py-3 text-left hover:bg-card-hover">
+              <span><span className="text-sm font-semibold text-text-primary">Promo items</span><span className="ml-2 text-xs text-text-muted">{analysisQ.data.promo_rows.length} detail rows | excluded from category shares</span></span>
+              {showPromo ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+            {showPromo && <div className="max-h-64 overflow-auto border-t border-border"><table className="w-full min-w-[900px] text-xs">
+              <thead className="sticky top-0 bg-surface"><tr>{[...rowLabels, "Total Sales", "Last 6M Sales", "Current Stock", "ST%", "F4M Requirement", "Stock - F4M Requirement"].map((label, index) => <th key={label + index} className="border-b border-r border-border px-3 py-2 text-left font-semibold text-text-secondary">{label}</th>)}</tr></thead>
+              <tbody>{analysisQ.data.promo_rows.map((row, index) => <tr key={[row.category, ...dimensions.map((dimension) => row[dimension]), index].join("|")} className="border-b border-border/70 odd:bg-white/[0.025]">
+                {dimensions.map((column, dimensionIndex) => <td key={column + dimensionIndex} className="whitespace-nowrap border-r border-border/60 px-3 py-2 text-text-primary">{row[column] ?? "-"}</td>)}
+                {MEASURES.filter(({ key }) => !key.includes("contribution")).map((measure, measureIndex) => <td key={measure.key + measureIndex} className="whitespace-nowrap border-r border-border/60 px-3 py-2 text-right tabular-nums text-text-secondary">{measure.percent ? showPercent(row[measure.key]) : showNumber(row[measure.key])}</td>)}
+              </tr>)}</tbody>
+            </table></div>}
+          </div>}
         </Card>
       )}
     </div>

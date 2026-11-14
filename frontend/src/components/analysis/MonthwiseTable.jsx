@@ -58,6 +58,9 @@ export default function MonthwiseTable({
   const dims = result?.dimensions || [];
   const months = result?.months || [];
   const activeMeasure = measureOptions.find((m) => m.key === measure) || measureOptions[0];
+  const currentFyLabel = result?.fy_context?.current_fy_label || "Current FY";
+  const fyMatch = currentFyLabel.match(/^FY(\d{4})-(\d{2})$/);
+  const previousFyLabel = fyMatch ? `FY${Number(fyMatch[1]) - 1}-${String(Number(fyMatch[1]) - 1 + 1).slice(-2)}` : "Prior FY";
 
   const cumulativeKey = `__cumulative_${measure}`;
   const pctKey = `__cumulativePct_${measure}`;
@@ -163,7 +166,7 @@ export default function MonthwiseTable({
       columns: [
         {
           accessorKey: `${m.key}__lfy_${measure}`,
-          header: "LFY",
+          header: previousFyLabel,
           size: 130,
           cell: ({ getValue }) => (
             <span className="text-text-secondary">{fmtMeasure(getValue())}</span>
@@ -171,7 +174,7 @@ export default function MonthwiseTable({
         },
         {
           accessorKey: `${m.key}__cfy_${measure}`,
-          header: "CFY",
+          header: currentFyLabel,
           size: 130,
           cell: ({ getValue }) => {
             const v = getValue();
@@ -203,7 +206,7 @@ const contribCol = {
     };
     const cumulativeCol = {
       accessorKey: cumulativeKey,
-      header: "Cumulative (CFY)",
+      header: `Cumulative (${currentFyLabel})`,
       size: 220,
       cell: ({ getValue, row }) => {
         const v = getValue();
@@ -219,7 +222,7 @@ const contribCol = {
     };
 
     return [...dimCols, ...monthCols, contribCol, cumulativeCol];
-  }, [dims, months, measure, dimensionLabels, cumulativeKey, pctKey, contribKey, fmtMeasure]);
+  }, [dims, months, measure, dimensionLabels, cumulativeKey, pctKey, contribKey, fmtMeasure, previousFyLabel, currentFyLabel]);
 
   /** Column model - LONG layout: months are ROWS (Apr → Mar reading top-down).
    *  Each month row carries the active measure's LFY / CFY / Growth %, the row's
@@ -247,7 +250,7 @@ const contribCol = {
     const valueCols = [
       {
         accessorKey: "ms_lfy",
-        header: "LFY",
+        header: previousFyLabel,
         size: 130,
         cell: ({ getValue }) => (
           <span className="text-text-secondary">{fmtMeasure(getValue())}</span>
@@ -255,7 +258,7 @@ const contribCol = {
       },
       {
         accessorKey: "ms_cfy",
-        header: "CFY",
+        header: currentFyLabel,
         size: 130,
         cell: ({ getValue }) => {
           const v = getValue();
@@ -284,7 +287,7 @@ const contribCol = {
       },
       {
         accessorKey: cumulativeKey,
-        header: "Cumulative (CFY)",
+        header: `Cumulative (${currentFyLabel})`,
         size: 220,
         cell: ({ getValue, row }) => {
           const v = getValue();
@@ -301,7 +304,7 @@ const contribCol = {
     ];
 
     return [...dimCols, monthCol, ...valueCols];
-  }, [dims, measure, dimensionLabels, cumulativeKey, pctKey, fmtMeasure]);
+  }, [dims, measure, dimensionLabels, cumulativeKey, pctKey, fmtMeasure, previousFyLabel, currentFyLabel]);
 
   const isVertical = layout === "rows";
 
