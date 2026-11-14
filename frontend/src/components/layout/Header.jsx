@@ -1,4 +1,4 @@
-import { Moon, Sun, RefreshCw, User, LogOut, Users, Activity, ShieldCheck } from "lucide-react";
+import { Moon, Sun, RefreshCw, User, LogOut, Users, Activity, ShieldCheck, Store, TerminalSquare, PackageSearch } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { useMutation } from "@tanstack/react-query";
@@ -177,6 +177,18 @@ export default function Header() {
                   >
                     <Users size={16} />
                     User Access
+                  </NavLink>
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                    Incomplete sections
+                  </div>
+                  <NavLink to="/store-master" onClick={() => setShowUserMenu(false)} className={({ isActive }) => clsx("flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-secondary hover:text-text-primary hover:bg-card-hover")}>
+                    <Store size={16} /> Store Master
+                  </NavLink>
+                  <NavLink to="/sql-platform" onClick={() => setShowUserMenu(false)} className={({ isActive }) => clsx("flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-secondary hover:text-text-primary hover:bg-card-hover")}>
+                    <TerminalSquare size={16} /> SQL Platform
+                  </NavLink>
+                  <NavLink to="/css-stock" onClick={() => setShowUserMenu(false)} className={({ isActive }) => clsx("flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-secondary hover:text-text-primary hover:bg-card-hover")}>
+                    <PackageSearch size={16} /> Order-to-Transformation Tracker
                   </NavLink>
                 </div>
               )}

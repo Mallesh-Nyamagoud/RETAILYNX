@@ -4,12 +4,9 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   TrendingUp,
-  Store,
-  TerminalSquare,
   BarChart3,
   CalendarRange,
   Target,
-  PackageSearch,
   Boxes,
   ChevronDown,
   ChevronsLeft,
@@ -20,22 +17,17 @@ import { useAppStore } from "../../store/useAppStore";
 /**
  * Sidebar - the module rail. This is the ONE place the platform's modules are
  * listed (the Dashboard deliberately does not repeat them), so it carries the
- * flagship treatment: a titled header, icon tiles, the module numeral from the
- * requirements doc, an accent rail on the active module and a hover state that
- * lifts the item instead of just recolouring it.
+ * flagship treatment: a titled header, icon tiles and an accent rail for the active module.
  */
 const NAV_ITEMS = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, numeral: null },
-  { to: "/secondary", label: "Secondary Sales Analysis", icon: TrendingUp, numeral: "I" },
-  { to: "/secondary/summary", label: "Secondary Sales Summary", icon: BarChart3, numeral: null },
-  { to: "/secondary/monthwise", label: "Secondary Monthwise Analysis", icon: CalendarRange, numeral: null },
-  { to: "/store-master", label: "Store Master", icon: Store, numeral: "II" },
-  { to: "/sql-platform", label: "SQL Platform", icon: TerminalSquare, numeral: "III" },
-  { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3, numeral: "IV" },
-  { to: "/tertiary/summary", label: "Tertiary Sales Summary", icon: BarChart3, numeral: null },
-  { to: "/tertiary/monthwise", label: "Tertiary Monthwise Analysis", icon: CalendarRange, numeral: null },
-  { to: "/tertiary/kpi-tracking", label: "Tertiary KPI Tracking", icon: Target, numeral: null },
-  { to: "/css-stock", label: "Order-to-Transformation Tracker", icon: PackageSearch, numeral: "V" },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/secondary", label: "Secondary Sales Analysis", icon: TrendingUp },
+  { to: "/secondary/summary", label: "Secondary Sales Summary", icon: BarChart3 },
+  { to: "/secondary/monthwise", label: "Secondary Monthwise Analysis", icon: CalendarRange },
+  { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3 },
+  { to: "/tertiary/summary", label: "Tertiary Sales Summary", icon: BarChart3 },
+  { to: "/tertiary/monthwise", label: "Tertiary Monthwise Analysis", icon: CalendarRange },
+  { to: "/tertiary/kpi-tracking", label: "Tertiary KPI Tracking", icon: Target },
 ];
 
 export default function Sidebar() {
@@ -117,31 +109,8 @@ export default function Sidebar() {
                   )}
                 >
                   <item.icon size={15} />
-                  {/* Collapsed rail: the requirement-doc numeral rides the tile. */}
-                  {collapsed && item.numeral && (
-                    <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-surface font-display text-[8px] font-bold text-text-muted">
-                      {item.numeral}
-                    </span>
-                  )}
                 </span>
-
-                {!collapsed && (
-                  <>
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {item.numeral && (
-                      <span
-                        className={clsx(
-                          "shrink-0 rounded-md border px-1.5 py-0.5 font-display text-[10px] font-bold tabular-nums transition-colors",
-                          isActive
-                            ? "border-accent/30 bg-surface/70 text-accent"
-                            : "border-border/70 bg-base/60 text-text-muted group-hover:text-text-secondary"
-                        )}
-                      >
-                        {item.numeral}
-                      </span>
-                    )}
-                  </>
-                )}
+                {!collapsed && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
               </>
             )}
           </NavLink>
@@ -154,7 +123,6 @@ export default function Sidebar() {
             <span className={clsx("absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-accent transition-opacity duration-200", sohActive ? "opacity-100" : "opacity-0 group-hover:opacity-40")} />
             <span className={clsx("relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-all duration-200", sohActive ? "bg-gradient-to-br from-accent to-accent-hover text-white shadow-sm" : "bg-base/70 text-text-muted group-hover:bg-card-hover group-hover:text-text-primary")}>
               <Boxes size={15} />
-              {collapsed && <span className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-surface font-display text-[8px] font-bold text-text-muted">VI</span>}
             </span>
             {!collapsed && <><span className="min-w-0 flex-1 truncate text-left">SOH Analysis</span><ChevronDown size={14} className={clsx("shrink-0 transition-transform", sohExpanded && "rotate-180")} /></>}
           </button>
