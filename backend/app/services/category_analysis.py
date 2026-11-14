@@ -689,18 +689,36 @@ def _cached_payload(dims: tuple[str, ...], filter_items: tuple, _token: tuple) -
         "fy_context": None,
     }
 
+    if not categories:
+        return payload
+
+    df = _apply_filters(_load_facts(_cache_token()), filters)
     fy = _fy_context()
-    if fy is None or not categories:
+    selected_fys = [int(value) for value in filters.get("fy", []) if str(value).isdigit()]
+    if selected_fys and not df.empty:
+        anchor_fy = max(selected_fys)
+        fiscal_years = df["tx_date"].dt.year - (df["tx_date"].dt.month < 4).astype("int64")
+        selected_dates = df.loc[fiscal_years == anchor_fy, "tx_date"]
+        if not selected_dates.empty:
+            max_date = selected_dates.max()
+            fy = build_fy_context(max_date.date() if hasattr(max_date, "date") else max_date)
+        else:
+            fy = None
+    if fy is None:
         return payload
     payload["fy_context"] = fy.to_dict()
 
-    df = _apply_filters(_load_facts(_cache_token()), filters)
     if not df.empty:
         tx = df["tx_date"]
         cfy = df[(tx >= pd.Timestamp(fy.current_fy_start)) & (tx <= pd.Timestamp(fy.current_fy_end))]
         lfy = df[(tx >= pd.Timestamp(fy.last_fy_start)) & (tx <= pd.Timestamp(fy.last_fy_end))]
         # TWO groupbys feed both tables: Level 1 keys, Level 2 keys.
         lfy_ytd = df[(tx >= pd.Timestamp(fy.last_fy_start)) & (tx <= pd.Timestamp(fy.lfy_ytd_end))]
+        selected_months = [int(value) for value in filters.get("month", []) if str(value).isdigit()]
+        if selected_months:
+            cfy = cfy[cfy["tx_date"].dt.month.isin(selected_months)]
+            lfy = lfy[lfy["tx_date"].dt.month.isin(selected_months)]
+            lfy_ytd = lfy_ytd[lfy_ytd["tx_date"].dt.month.isin(selected_months)]
 
         keys1 = list(dims) + [CATEGORY_COL]
         keys2 = list(dims) + [CATEGORY_COL, SUBCATEGORY_COL]

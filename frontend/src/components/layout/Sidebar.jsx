@@ -3,7 +3,6 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
-  TrendingUp,
   BarChart3,
   CalendarRange,
   Target,
@@ -21,10 +20,8 @@ import { useAppStore } from "../../store/useAppStore";
  */
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/secondary", label: "Secondary Sales Analysis", icon: TrendingUp },
   { to: "/secondary/summary", label: "Secondary Sales Summary", icon: BarChart3 },
   { to: "/secondary/monthwise", label: "Secondary Monthwise Analysis", icon: CalendarRange },
-  { to: "/tertiary", label: "Tertiary Sales Analysis", icon: BarChart3 },
   { to: "/tertiary/summary", label: "Tertiary Sales Summary", icon: BarChart3 },
   { to: "/tertiary/monthwise", label: "Tertiary Monthwise Analysis", icon: CalendarRange },
   { to: "/tertiary/kpi-tracking", label: "Tertiary KPI Tracking", icon: Target },

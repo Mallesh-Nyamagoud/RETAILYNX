@@ -1,4 +1,4 @@
-import { Moon, Sun, RefreshCw, User, LogOut, Users, Activity, ShieldCheck, Store, TerminalSquare, PackageSearch } from "lucide-react";
+import { Moon, Sun, RefreshCw, User, LogOut, Users, Activity, ShieldCheck, Store, TerminalSquare, PackageSearch, TrendingUp, BarChart3 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { useMutation } from "@tanstack/react-query";
@@ -177,6 +177,15 @@ export default function Header() {
                   >
                     <Users size={16} />
                     User Access
+                  </NavLink>
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                    Analysis pages
+                  </div>
+                  <NavLink to="/secondary" onClick={() => setShowUserMenu(false)} className={({ isActive }) => clsx("flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-secondary hover:text-text-primary hover:bg-card-hover")}>
+                    <TrendingUp size={16} /> Secondary Sales Analysis
+                  </NavLink>
+                  <NavLink to="/tertiary" onClick={() => setShowUserMenu(false)} className={({ isActive }) => clsx("flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors", isActive ? "bg-accent-soft text-accent" : "text-text-secondary hover:text-text-primary hover:bg-card-hover")}>
+                    <BarChart3 size={16} /> Tertiary Sales Analysis
                   </NavLink>
                   <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
                     Incomplete sections

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { tertiaryApi } from "../api/client";
 import { ErrorState, LoadingState } from "../components/common/LoadingState";
+import CategoryPerformance from "../components/analysis/CategoryPerformance";
+import BillNoAnalysis from "../components/analysis/BillNoAnalysis";
 
 const FILTER_ORDER = ["store", "department", "store_status", "store_type", "brand", "state", "group", "month", "fy"];
 const DIMENSIONS = [["store", "Storewise Analysis"], ["brand", "Brandwise Analysis"]];
@@ -102,7 +104,8 @@ function BucketTable({ title, dimensionLabel, buckets, rows, periodLabels, searc
 export default function TertiaryKpiTracking() {
   const [filters, setFilters] = useState({});
   const [openFilter, setOpenFilter] = useState(null);
-  const [dimension, setDimension] = useState("store");
+  const [section, setSection] = useState("quantity");
+  const [dimensions, setDimensions] = useState({ quantity: "store", revenue: "store", category: "store", bills: "store" });
   const [qtySearch, setQtySearch] = useState("");
   const [revenueSearch, setRevenueSearch] = useState("");
   const filterPanelRef = useRef(null);
@@ -110,10 +113,14 @@ export default function TertiaryKpiTracking() {
   const configQuery = useQuery({
     queryKey: ["tertiary-kpi-tracking", "config", filters],
     queryFn: () => tertiaryApi.summaryConfig(filters),
+    staleTime: 5 * 60_000,
   });
   const dataQuery = useQuery({
-    queryKey: ["tertiary-kpi-tracking", dimension, filters],
-    queryFn: () => tertiaryApi.kpiTracking(dimension, filters),
+    queryKey: ["tertiary-kpi-tracking", dimensions[section], filters],
+    queryFn: () => tertiaryApi.kpiTracking(dimensions[section], filters),
+    enabled: section === "quantity" || section === "revenue",
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey?.[1] === dimensions[section] ? previous : undefined,
+    staleTime: 60_000,
   });
 
   useEffect(() => {
@@ -139,6 +146,21 @@ export default function TertiaryKpiTracking() {
     return next;
   });
 
+  const dimension = dimensions[section] || "store";
+  const selectedDimension = dimension === "store"
+    ? (config?.fields?.store || "adonis_store_code")
+    : (config?.fields?.brand || "brand");
+  const hierarchy = [selectedDimension];
+  const categoryFilters = Object.fromEntries(Object.entries(filters)
+    .filter(([, values]) => values?.length)
+    .map(([key, values]) => [key === "month" || key === "fy" ? key : config?.fields?.[key] || key, values]));
+  const billFilters = Object.fromEntries(Object.entries(filters)
+    .filter(([key, values]) => key !== "fy" && key !== "month" && values?.length)
+    .map(([key, values]) => [config?.fields?.[key] || key, values]));
+  if (filters.month?.length) billFilters.month_num = filters.month.map(Number).filter(Number.isFinite);
+  const anchorFy = (filters.fy || []).map(Number).filter(Number.isFinite).sort((a, b) => b - a)[0];
+  const billDateRange = anchorFy ? { start: `${anchorFy}-04-01`, end: `${anchorFy + 1}-03-31` } : null;
+  const setDimension = (value) => setDimensions((current) => ({ ...current, [section]: value }));
   const payload = dataQuery.data;
   const bucketNames = payload?.buckets || { quantity: [], revenue: [] };
   const rowsFor = (type) => type === "quantity" ? payload?.quantity_rows || [] : payload?.revenue_rows || [];
@@ -148,7 +170,7 @@ export default function TertiaryKpiTracking() {
     <header>
       <p className="text-xs font-semibold uppercase tracking-[.18em] text-accent">Retail sell-out</p>
       <h1 className="mt-1 font-display text-2xl font-bold text-text-primary">Tertiary KPI Tracking</h1>
-      <p className="mt-1 text-sm text-text-muted">Bill distribution by quantity and revenue bands, with year-over-year count and mix movement</p>
+      <p className="mt-1 text-sm text-text-muted">Storewise and brandwise views for bill buckets, category performance, and top bills</p>
     </header>
 
     <section ref={filterPanelRef} className="flex flex-wrap gap-2 rounded-xl border border-border bg-surface p-3">
@@ -160,17 +182,23 @@ export default function TertiaryKpiTracking() {
     </section>
 
     <section className="overflow-hidden rounded-xl border border-border bg-surface">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-        <div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-accent">KPI Tracking</p><h2 className="mt-1 font-display text-lg font-semibold text-text-primary">{dimension === "store" ? "Storewise" : "Brandwise"} Bucket Analysis</h2><p className="mt-1 text-xs text-text-muted">Prior FY full year, matching prior period, current FY, and growth</p></div>
-        {periodLabels.anchor && <span className="rounded-lg border border-border bg-base px-3 py-2 text-xs font-semibold text-text-secondary">Anchor FY: {fyLabel(periodLabels.anchor)}</span>}
-      </header>
-      <nav aria-label="KPI tracking dimensions" className="flex gap-1 overflow-x-auto border-b border-border px-2">
-        {DIMENSIONS.map(([key, label]) => <button key={key} type="button" onClick={() => { setDimension(key); setQtySearch(""); setRevenueSearch(""); }} className={"whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold " + (dimension === key ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text-primary")}>{label}</button>)}
+      <nav aria-label="Tertiary KPI analyses" className="flex flex-wrap gap-1 border-b border-border px-2">
+        {[["quantity", "Quantity Bucket"], ["revenue", "Revenue Bucket"], ["category", "Category Performance"], ["bills", "Top N Bills"]].map(([key, label]) =>
+          <button key={key} type="button" onClick={() => setSection(key)} className={"border-b-2 px-4 py-3 text-sm font-semibold transition-colors " + (section === key ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text-primary")}>{label}</button>
+        )}
       </nav>
-      {dataQuery.isLoading ? <div className="space-y-4 p-4"><LoadingState rows={1} /><LoadingState rows={8} /></div> : dataQuery.isError ? <div className="p-4"><ErrorState message={dataQuery.error.message} onRetry={() => dataQuery.refetch()} /></div> : <div className="space-y-5 p-4">
-        <BucketTable title="Quantity Bucket Based Analysis" buckets={bucketNames.quantity} rows={rowsFor("quantity")} dimensionLabel={dimension === "store" ? "STORE" : "BRAND"} periodLabels={periodLabels} search={qtySearch} onSearch={setQtySearch} />
-        <BucketTable title="Revenue Bucket Based Analysis" buckets={bucketNames.revenue} rows={rowsFor("revenue")} dimensionLabel={dimension === "store" ? "STORE" : "BRAND"} periodLabels={periodLabels} search={revenueSearch} onSearch={setRevenueSearch} />
-      </div>}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-base/30 px-4 py-3">
+        <div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-accent">{section === "quantity" ? "Quantity Bucket Based Analysis" : section === "revenue" ? "Revenue Bucket Based Analysis" : section === "category" ? "Category Performance" : "Top N Bills"}</p><p className="mt-1 text-xs text-text-muted">Choose the row level for this analysis. Global filters above apply to the results.</p></div>
+        <div role="group" aria-label="Analysis row level" className="inline-flex rounded-lg border border-border bg-surface p-1">
+          {DIMENSIONS.map(([key, label]) => <button key={key} type="button" onClick={() => setDimension(key)} aria-pressed={dimension === key} className={"rounded-md px-3 py-1.5 text-xs font-semibold transition-colors " + (dimension === key ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary")}>{label}</button>)}
+        </div>
+      </div>
+
+      {(section === "quantity" || section === "revenue") && (dataQuery.isLoading ? <div className="space-y-4 p-4"><LoadingState rows={1} /><LoadingState rows={8} /></div> : dataQuery.isError ? <div className="p-4"><ErrorState message={dataQuery.error.message} onRetry={() => dataQuery.refetch()} /></div> : <div className="p-4">
+        <BucketTable title={section === "quantity" ? "Quantity Bucket Based Analysis" : "Revenue Bucket Based Analysis"} buckets={bucketNames[section]} rows={rowsFor(section)} dimensionLabel={dimension === "store" ? "STORE" : "BRAND"} periodLabels={periodLabels} search={section === "quantity" ? qtySearch : revenueSearch} onSearch={section === "quantity" ? setQtySearch : setRevenueSearch} />
+      </div>)}
+      {section === "category" && <div className="p-4"><CategoryPerformance api={tertiaryApi} filters={categoryFilters} hierarchy={hierarchy} eyebrow="Tertiary KPI Tracking" /></div>}
+      {section === "bills" && <div className="p-4"><BillNoAnalysis filters={billFilters} hierarchy={hierarchy} eyebrow="Tertiary KPI Tracking" topBillsOnly dateRange={billDateRange} /></div>}
     </section>
   </main>;
 }

@@ -715,7 +715,7 @@ function TopBills({ topBills, storeScoped = false, retailerFirst = false, maxHei
  * ------------------------------------------------------------------------- */
 const DIM_DEFAULTS = { hierarchy: ["brand"], distDim: "brand", topN: 25 };
 
-export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
+export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow, topBillsOnly = false, dateRange = null }) {
   const [distDim, setDistDim] = useState(DIM_DEFAULTS.distDim);
   const [topN, setTopN] = useState(DIM_DEFAULTS.topN);
   const [topNInput, setTopNInput] = useState(String(DIM_DEFAULTS.topN));
@@ -758,8 +758,8 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
   const effectiveDistDim = distTouched.current ? distDim : (rowHierarchy[0] || "all");
 
   const q = useQuery({
-    queryKey: [eyebrow, "bill-kpi-analysis", filters, rowHierarchy, effectiveDistDim, topN],
-    queryFn: () => billKpiApi.analysis(filters, rowHierarchy, effectiveDistDim, topN),
+    queryKey: [eyebrow, "bill-kpi-analysis", filters, rowHierarchy, effectiveDistDim, topN, dateRange],
+    queryFn: () => billKpiApi.analysis(filters, rowHierarchy, effectiveDistDim, topN, dateRange),
     placeholderData: (previousData) => previousData,
     staleTime: 5 * 60_000,
     retry: false,
@@ -805,7 +805,7 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
             )}
           </div>
           <div className="flex flex-wrap items-end gap-4">
-            <DimSelect
+            {!topBillsOnly && <DimSelect
               label="Distribution Dimension"
               value={effectiveDistDim}
               onChange={(v) => {
@@ -814,7 +814,7 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
               }}
               options={dimOptions}
               includeAll
-            />
+            />}
             <label className="flex flex-col gap-1 min-w-[130px]">
               <span className="text-[11px] font-semibold tracking-wide text-text-secondary uppercase">
                 Top N Bills
@@ -854,6 +854,7 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
         </Card>
       ) : (
         <>
+          {!topBillsOnly && <>
           {/* 1 · KPI cards — all KPIs, each with LFY + CFY + Growth in one card */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {(q.data.kpis || []).map((kpi, i) => (
@@ -914,6 +915,7 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow }) {
             )}
           </SectionCard>
 
+          </>}
           {/* 4 · Top bills (LFY vs CFY) */}
           <SectionCard
             icon={Trophy}
