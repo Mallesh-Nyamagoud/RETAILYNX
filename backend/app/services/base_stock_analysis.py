@@ -358,7 +358,7 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
     combined["total_sales_contribution_pct"] = combined["total_sales"].map(lambda value: safe_pct(value, combined["total_sales"].sum()))
     combined["last_6m_contribution_pct"] = combined["last_6m_sales"].map(lambda value: safe_pct(value, combined["last_6m_sales"].sum()))
     combined["current_stock_contribution_pct"] = combined["current_stock"].map(lambda value: safe_pct(value, combined["current_stock"].sum()))
-    combined["st_pct"] = combined.apply(lambda row: safe_pct(row["last_6m_sales"], row["current_stock"]), axis=1)
+    combined["st_pct"] = combined.apply(lambda row: safe_pct(row["last_6m_sales"], row["last_6m_sales"] + row["current_stock"]), axis=1)
     combined["f4m_requirement"] = combined["last_6m_sales"] / 6 * 4
     combined["requirement"] = combined["current_stock"] - combined["f4m_requirement"]
     combined = combined.drop(columns=["_category_key"], errors="ignore")

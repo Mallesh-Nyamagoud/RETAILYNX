@@ -10,6 +10,7 @@ import PageHeader from "../components/layout/PageHeader";
 
 const NUMBER = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
 const PERCENT = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
+const CATEGORY_GROUP_ORDER = { TOPS: 0, BOTTOMS: 1, OTHER: 2 };
 const MEASURES = [
   { key: "total_sales", label: "Total Sales" },
   { key: "total_sales_contribution_pct", label: "Cont.%", percent: true },
@@ -85,6 +86,12 @@ export default function BaseStockAnalysis() {
   const rows = useMemo(() => {
     const result = [...(analysisQ.data?.rows || [])];
     return result.sort((a, b) => {
+      const groupA = String(a.category_group ?? "").trim().toUpperCase();
+      const groupB = String(b.category_group ?? "").trim().toUpperCase();
+      const groupRankA = CATEGORY_GROUP_ORDER[groupA] ?? 3;
+      const groupRankB = CATEGORY_GROUP_ORDER[groupB] ?? 3;
+      if (groupRankA !== groupRankB) return groupRankA - groupRankB;
+      if (groupRankA === 3 && groupA !== groupB) return groupA.localeCompare(groupB);
       const contributionOrder = (Number(b[sort.key]) || 0) - (Number(a[sort.key]) || 0);
       if (contributionOrder) return sort.direction === "desc" ? contributionOrder : -contributionOrder;
       for (const key of dimensions) {
@@ -123,7 +130,7 @@ export default function BaseStockAnalysis() {
                 onChange={(next) => setDimensions(next.includes("category") ? next : [...next, "category"])}
               />
               <p className="mt-2 flex items-center gap-1.5 text-xs text-text-muted">
-                <Layers3 size={13} /> Category, Category Group, and Subcategory are mapped from the sales data; add or reorder row dimensions as needed.
+                <Layers3 size={13} /> Category and Category Group use the SOH fields aligned to Tertiary; Subcategory is enriched from sales data. Add or reorder row dimensions as needed.
               </p>
             </div>
           )}
@@ -157,7 +164,7 @@ export default function BaseStockAnalysis() {
           <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-text-primary">Category Stock Position {analysisQ.isFetching && <span className="ml-2 text-xs font-normal text-text-muted">Updating…</span>}</h2>
-              <p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString()} rows | sorted by {sortLabel} ({sort.direction === "desc" ? "highest first" : "lowest first"})</p>
+              <p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString()} rows | groups ordered TOPS, BOTTOMS, OTHER | sorted by {sortLabel} within each group ({sort.direction === "desc" ? "highest first" : "lowest first"})</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full border border-border bg-surface px-3 py-1 font-semibold text-text-secondary">Current FY: {fiscalYearLabel(analysisQ.data?.tertiary_as_of) || "Unavailable"}</span><span className="text-text-muted">F4M = (Last 6M Sales / 6) * 4</span></div>
           </div>
@@ -203,7 +210,7 @@ export default function BaseStockAnalysis() {
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-xs text-text-muted">ST% = Last 6M Sales / Current Stock. Stock - F4M Requirement is positive when stock is above four-month demand and negative when it is below.</p>
+          <p className="mt-3 text-xs text-text-muted">ST% = Last 6M Sales / (Last 6M Sales + Current Stock). F4M Requirement = (Last 6M Sales / 6) * 4. Stock - F4M Requirement is positive when stock is above four-month demand and negative when it is below.</p>
           {(analysisQ.data?.promo_rows || []).length > 0 && <div className="mt-4 overflow-hidden rounded-lg border border-border/80">
             <button type="button" aria-expanded={showPromo} onClick={() => setShowPromo((value) => !value)} className="flex w-full items-center justify-between gap-3 bg-surface/70 px-4 py-3 text-left hover:bg-card-hover">
               <span><span className="text-sm font-semibold text-text-primary">Promo items</span><span className="ml-2 text-xs text-text-muted">{analysisQ.data.promo_rows.length} detail rows | excluded from category shares</span></span>
