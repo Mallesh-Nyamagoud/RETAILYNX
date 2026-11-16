@@ -115,6 +115,14 @@ export default function Dashboard() {
     queryKey: ["dashboard", "state", stateFilters],
     queryFn: () => secondaryApi.pivot(["state"], stateFilters),
   });
+  const tertiaryBrandQ = useQuery({
+    queryKey: ["dashboard", "tertiary-brand", brandFilters],
+    queryFn: () => tertiaryApi.pivot(["brand"], brandFilters),
+  });
+  const tertiaryGroupQ = useQuery({
+    queryKey: ["dashboard", "tertiary-group", groupFilters],
+    queryFn: () => tertiaryApi.pivot(["group"], groupFilters),
+  });
   const storeTypeQ = useQuery({
     queryKey: ["dashboard", "store_type", storeTypeFilters],
     queryFn: () => secondaryApi.pivot(["store_type"], storeTypeFilters),
@@ -125,10 +133,12 @@ export default function Dashboard() {
   const loading =
     secondaryQ.isLoading || tertiaryQ.isLoading || storeQ.isLoading || cssQ.isLoading;
   const chartsLoading =
-    brandQ.isLoading || groupQ.isLoading || deptQ.isLoading || stateQ.isLoading || storeTypeQ.isLoading;
+    brandQ.isLoading || groupQ.isLoading || tertiaryBrandQ.isLoading || tertiaryGroupQ.isLoading || deptQ.isLoading || stateQ.isLoading || storeTypeQ.isLoading;
 
   const brandData = useMemo(() => toComparisonData(brandQ.data?.rows, "brand"), [brandQ.data]);
   const groupData = useMemo(() => toComparisonData(groupQ.data?.rows, "group"), [groupQ.data]);
+  const tertiaryBrandData = useMemo(() => toComparisonData(tertiaryBrandQ.data?.rows, "brand"), [tertiaryBrandQ.data]);
+  const tertiaryGroupData = useMemo(() => toComparisonData(tertiaryGroupQ.data?.rows, "group"), [tertiaryGroupQ.data]);
   const deptData = useMemo(() => toDonutData(deptQ.data?.rows, "department"), [deptQ.data]);
   const stateData = useMemo(() => toDonutData(stateQ.data?.rows, "state"), [stateQ.data]);
   const storeTypeData = useMemo(
@@ -199,6 +209,7 @@ export default function Dashboard() {
             label="Total Active Doors"
             qty={storeQ.data?.total_active_doors}
             accent="positive"
+            hint={`SIS ${storeQ.data?.sis_doors ?? 0} · Non-SIS ${storeQ.data?.non_sis_doors ?? 0}`}
           />
         </div>
       )}
@@ -225,6 +236,21 @@ export default function Dashboard() {
             {...crossFilterProps("group")}
           />
 
+          <ComparisonBarChart
+            title="Brandwise Taxable Value Comparison"
+            eyebrow="Tertiary Sales · Taxable Value"
+            dataTestId="dash-tertiary-brand-comparison"
+            data={tertiaryBrandData}
+            {...crossFilterProps("brand")}
+          />
+
+          <ComparisonBarChart
+            title="Groupwise Taxable Value Comparison"
+            eyebrow="Tertiary Sales · Taxable Value"
+            dataTestId="dash-tertiary-group-comparison"
+            data={tertiaryGroupData}
+            {...crossFilterProps("group")}
+          />
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
             <ContributionDonutChart
               title="Departmentwise Cont %"
