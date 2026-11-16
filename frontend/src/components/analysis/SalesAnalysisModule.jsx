@@ -60,7 +60,6 @@ export default function SalesAnalysisModule({
   const [tab, setTab] = useState("billing");
   const [dimensions, setDimensions] = useState([]);
   const [filters, setFilters] = useState({});
-  const [storeLimit, setStoreLimit] = useState(10);
 
   const dimCatalogQ = useQuery({
     queryKey: [eyebrow, "dimensions"],
@@ -87,23 +86,6 @@ export default function SalesAnalysisModule({
     return Object.fromEntries(cat.map((d) => [d.column, d.label]));
   }, [dimCatalogQ.data]);
 
-  const storeDimension = useMemo(() => {
-    const catalog = dimCatalogQ.data?.dimensions || [];
-    return catalog.find((d) => /store.?name|retailer.?name/i.test(`${d.column} ${d.label}`))
-      || catalog.find((d) => /store|retailer/i.test(`${d.column} ${d.label}`));
-  }, [dimCatalogQ.data]);
-  const storeRankingQ = useQuery({
-    queryKey: [eyebrow, "store-rankings", storeDimension?.column, filters],
-    queryFn: () => api.pivot([storeDimension.column], filters),
-    enabled: Boolean(storeDimension),
-  });
-  const storeRows = useMemo(() => {
-    const rows = (storeRankingQ.data?.rows || []).filter((row) => !row._is_total && row[storeDimension?.column]);
-    return {
-      growing: rows.filter((row) => Number(row.growth_pct_val) > 0).sort((a, b) => b.growth_pct_val - a.growth_pct_val).slice(0, storeLimit),
-      declining: rows.filter((row) => Number(row.growth_pct_val) < 0).sort((a, b) => a.growth_pct_val - b.growth_pct_val).slice(0, storeLimit),
-    };
-  }, [storeRankingQ.data, storeDimension, storeLimit]);
   const grandTotal = findGrandTotal(pivotQ.data?.rows, dimensions.length > 0);
   const fyContext = pivotQ.data?.fy_context;
 
@@ -215,26 +197,6 @@ export default function SalesAnalysisModule({
         </Card>
       )}
 
-      {storeDimension && (
-        <Card className="mb-6" padded>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">Top store growth</h2><p className="mt-1 text-xs text-text-muted">Ranked by CFYTD growth versus LFYTD using current filters.</p></div>
-            <label className="flex items-center gap-2 text-xs font-semibold text-text-secondary">Stores to show
-              <select value={storeLimit} onChange={(event) => setStoreLimit(Number(event.target.value))} className="rounded-md border border-border bg-surface px-2.5 py-2 text-text-primary">{[5, 10, 20, 50].map((count) => <option key={count} value={count}>{count}</option>)}</select>
-            </label>
-          </div>
-          {storeRankingQ.isLoading ? <LoadingState rows={3} /> : storeRankingQ.isError ? <ErrorState message={storeRankingQ.error.message} onRetry={() => storeRankingQ.refetch()} /> : (
-            <div className="grid gap-5 lg:grid-cols-2">
-              {[{ title: "Top growing stores", rows: storeRows.growing, positive: true }, { title: "Top declining stores", rows: storeRows.declining, positive: false }].map((section) => (
-                <section key={section.title} className="overflow-hidden rounded-lg border border-border">
-                  <h3 className={clsx("border-b border-border px-4 py-3 text-xs font-bold uppercase tracking-wide", section.positive ? "text-positive" : "text-negative")}>{section.title}</h3>
-                  {section.rows.length ? <div className="divide-y divide-border">{section.rows.map((row, index) => <div key={`${row[storeDimension.column]}-${index}`} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"><span className="min-w-0 truncate font-medium text-text-primary">{row[storeDimension.column]}</span><span className={clsx("shrink-0 font-bold tabular-nums", section.positive ? "text-positive" : "text-negative")}>{Number(row.growth_pct_val).toFixed(1)}%</span></div>)}</div> : <p className="px-4 py-5 text-sm text-text-muted">No stores in this group for the current filters.</p>}
-                </section>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
       {/* Tabs */}
       <div className="flex items-center gap-1 mb-4 border-b border-border">
         {[
