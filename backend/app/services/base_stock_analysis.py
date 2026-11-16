@@ -155,6 +155,14 @@ def _find_source_column(columns: list[str], *candidates: str) -> str | None:
     return None
 
 
+def _canonical_soh_label(value, aliases: dict[str, str]):
+    """Align direct SOH labels with the equivalent Tertiary dimension value."""
+    if pd.isna(value) or not str(value).strip():
+        return None
+    label = str(value).strip()
+    return aliases.get(_norm(label), label)
+
+
 @lru_cache(maxsize=4)
 def _latest_stock_categories_cached(token: tuple, soh_path: str, soh_mtime_ns: int, soh_size: int):
     """Prepare latest SOH rows once; filter changes reuse this expensive join."""
@@ -168,7 +176,9 @@ def _latest_stock_categories_cached(token: tuple, soh_path: str, soh_mtime_ns: i
             "style": _find_source_column(columns, "pc9", "style", "style_code"),
             "season": _find_source_column(columns, "season", "season_name"),
             "category_group": _find_source_column(columns, "category_group", "category group", "categorygroup", "cg"),
-            "category": _find_source_column(columns, "category"),
+            # The importer stores the workbook's CATEGORY column as top_bottom.
+            # Prefer this direct category instead of inferring it from a style.
+            "category": _find_source_column(columns, "category", "top_bottom"),
             "subcategory": _find_source_column(columns, "subcategory", "sub_category", "sub category"),
             "soh_category": _find_source_column(columns, "gc"),
             "qty": _find_source_column(columns, "qty", "quantity", "current_qty", "current_stock", "stock_qty"),
@@ -203,6 +213,14 @@ def _latest_stock_categories_cached(token: tuple, soh_path: str, soh_mtime_ns: i
         """).df()
     if stock.empty:
         return stock, stock_as_of, ()
+    # Use the SOH workbook's category/category-group fields directly. These
+    # aliases reconcile its labels with Tertiary's category and CG values.
+    stock["category"] = stock["category"].map(
+        lambda value: _canonical_soh_label(value, {"PROMO": "PROMO ITEMS"})
+    )
+    stock["category_group"] = stock["category_group"].map(
+        lambda value: _canonical_soh_label(value, {"TOP": "TOPS", "BOTTOM": "BOTTOMS", "PROMO": "OTHER"})
+    )
     stock = soh_analysis._store_code_lookup(stock, warnings)
     if stock[["category_group", "category", "subcategory"]].isna().any().any():
         category_map = execute_df("""
