@@ -290,11 +290,22 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
         for column in row_dimensions
     )
     select_dims = f", {dim_select}" if dim_select else ""
+    availability_dimensions = [column for column in row_dimensions if column not in PRODUCT_DIMENSION_COLUMNS]
+    availability_select = ", ".join(f"dim.{quote_ident(column)} AS {quote_ident(column)}" for column in availability_dimensions)
+    availability_dims_sql = f", {availability_select}" if availability_select else ""
+    availability_group_sql = " GROUP BY " + ", ".join("dim." + quote_ident(column) for column in availability_dimensions) if availability_dimensions else ""
+    availability = execute_df(f"""
+        SELECT COUNT(DISTINCT DATE_TRUNC('month', CAST(f.date AS DATE))) AS active_sales_months{availability_dims_sql}
+        FROM tertiary_data.data f
+        LEFT JOIN store_master.store_details dim
+          ON f.adonis_store_code = dim.adonis_store_code AND f.brand_code = dim.brand_code
+        WHERE f.category IS NOT NULL
+          AND CAST(f.date AS DATE) >= ? AND CAST(f.date AS DATE) <= ? {filter_sql}{availability_group_sql}
+    """, [six_month_start, sales_as_of, *filter_params, *product_filter_params])
     sales_rows = execute_df(f"""
         SELECT TRIM(CAST(f.category AS VARCHAR)) AS category,
                UPPER(TRIM(CAST(f.category AS VARCHAR))) AS _category_key{select_dims},
                SUM(f.qty) AS total_sales,
-               MIN(CAST(f.date AS DATE)) AS first_sale_date,
                SUM(f.qty) FILTER (WHERE CAST(f.date AS DATE) >= ? AND CAST(f.date AS DATE) <= ?) AS last_6m_sales
         FROM tertiary_data.data f
         LEFT JOIN store_master.store_details dim
@@ -302,6 +313,11 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
         WHERE f.category IS NOT NULL {filter_sql}
         GROUP BY ALL
     """, [six_month_start, sales_as_of, *filter_params, *product_filter_params])
+    if availability_dimensions:
+        sales_rows = sales_rows.merge(availability, on=availability_dimensions, how="left")
+    else:
+        active_sales_months = int(availability["active_sales_months"].iloc[0]) if not availability.empty else 0
+        sales_rows["active_sales_months"] = active_sales_months
     if sales_rows.empty:
         return {"rows": [], "warnings": [], "tertiary_as_of": sales_as_of.isoformat(), "last_6m_start": six_month_start.isoformat(), "stock_as_of": None}
 
@@ -353,13 +369,11 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
     combined["total_sales"] = pd.to_numeric(combined["total_sales"], errors="coerce").fillna(0)
     combined["last_6m_sales"] = pd.to_numeric(combined["last_6m_sales"], errors="coerce").fillna(0)
     combined["current_stock"] = pd.to_numeric(combined["current_stock"], errors="coerce").fillna(0)
-    combined["first_sale_date"] = pd.to_datetime(combined.get("first_sale_date"), errors="coerce")
-    start_month = pd.Period(six_month_start, freq="M").ordinal
-    end_month = pd.Period(sales_as_of, freq="M").ordinal
-    first_ordinals = combined["first_sale_date"].dt.to_period("M").map(lambda value: max(start_month, value.ordinal) if pd.notna(value) else end_month)
-    combined["sales_months_available"] = (end_month - first_ordinals + 1).clip(lower=1)
-    combined["st_pct"] = combined.apply(lambda row: safe_pct(row["total_sales"], row["total_sales"] + row["current_stock"]), axis=1)
-    combined["f4m_requirement"] = combined["last_6m_sales"] / combined["sales_months_available"] * 4
+    combined["active_sales_months"] = pd.to_numeric(combined["active_sales_months"], errors="coerce").fillna(0)
+    month_divisor = combined["active_sales_months"].where(combined["active_sales_months"] > 0, 1)
+    combined["avg_pm"] = combined["last_6m_sales"] / month_divisor
+    combined["st_pct"] = combined.apply(lambda row: safe_pct(row["current_stock"], row["last_6m_sales"] + row["current_stock"]), axis=1)
+    combined["f4m_requirement"] = combined["avg_pm"] * 4
     combined["requirement"] = combined["current_stock"] - combined["f4m_requirement"]
     is_promo = combined["category"].fillna("").astype(str).str.contains(r"\bpromo\b", case=False, regex=True)
     promo_rows = combined.loc[is_promo].copy()
@@ -367,8 +381,8 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
     combined["total_sales_contribution_pct"] = combined["total_sales"].map(lambda value: safe_pct(value, combined["total_sales"].sum()))
     combined["last_6m_contribution_pct"] = combined["last_6m_sales"].map(lambda value: safe_pct(value, combined["last_6m_sales"].sum()))
     combined["current_stock_contribution_pct"] = combined["current_stock"].map(lambda value: safe_pct(value, combined["current_stock"].sum()))
-    combined = combined.drop(columns=["_category_key", "first_sale_date"], errors="ignore")
-    promo_rows = promo_rows.drop(columns=["_category_key", "first_sale_date"], errors="ignore")
+    combined = combined.drop(columns=["_category_key", "active_sales_months"], errors="ignore")
+    promo_rows = promo_rows.drop(columns=["_category_key", "active_sales_months"], errors="ignore")
     return {
         "rows": combined.to_dict("records"),
         "promo_rows": promo_rows.to_dict("records"),

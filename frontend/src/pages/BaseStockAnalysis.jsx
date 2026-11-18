@@ -19,7 +19,7 @@ const MEASURES = [
   { key: "current_stock", label: "Current Stock" },
   { key: "current_stock_contribution_pct", label: "Cont.%", percent: true },
   { key: "st_pct", label: "ST%", percent: true },
-  { key: "sales_months_available", label: "Sales Months" },
+  { key: "avg_pm", label: "Avg PM" },
   { key: "f4m_requirement", label: "F4M Requirement" },
   { key: "requirement", label: "Stock - F4M Requirement" },
 ];
@@ -170,7 +170,7 @@ export default function BaseStockAnalysis() {
               <h2 className="text-sm font-semibold text-text-primary">Category Stock Position {analysisQ.isFetching && <span className="ml-2 text-xs font-normal text-text-muted">Updating…</span>}</h2>
               <p className="mt-1 text-xs text-text-muted">{rows.length.toLocaleString()} rows | groups ordered TOPS, BOTTOMS, OTHER | sorted by {sortLabel} within each group ({sort.direction === "desc" ? "highest first" : "lowest first"})</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full border border-border bg-surface px-3 py-1 font-semibold text-text-secondary">Current FY: {fiscalYearLabel(analysisQ.data?.tertiary_as_of) || "Unavailable"}</span><span className="text-text-muted">F4M = (Last 6M Sales / sales months available) × 4</span></div>
+            <div className="flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full border border-border bg-surface px-3 py-1 font-semibold text-text-secondary">Current FY: {fiscalYearLabel(analysisQ.data?.tertiary_as_of) || "Unavailable"}</span><span className="text-text-muted">F4M = Avg PM × 4</span></div>
           </div>
           <div className="max-h-[70vh] min-h-[360px] overflow-auto rounded-xl border border-border bg-card">
             <table className="w-full min-w-[1500px] text-sm">
@@ -183,7 +183,7 @@ export default function BaseStockAnalysis() {
                   <th colSpan={2} className="border-b border-r border-border px-3 py-2 text-center text-xs font-bold uppercase tracking-wide text-text-secondary">Last 6M Sales</th>
                   <th colSpan={2} className="border-b border-r border-border px-3 py-2 text-center text-xs font-bold uppercase tracking-wide text-text-secondary">Current Stock</th>
                   <th rowSpan={2} className="border-b border-r border-border px-3 py-3 text-right font-semibold text-text-primary">ST%</th>
-                  <th rowSpan={2} className="border-b border-r border-border px-3 py-3 text-right font-semibold text-text-primary">Sales Months</th>
+                  <th rowSpan={2} className="border-b border-r border-border px-3 py-3 text-right font-semibold text-text-primary">Avg PM</th>
                   <th rowSpan={2} className="border-b border-r border-border px-3 py-3 text-right font-semibold text-text-primary">F4M Requirement</th>
                   <th rowSpan={2} className="border-b border-border px-3 py-3 text-right font-semibold text-text-primary">Stock - F4M Requirement</th>
                 </tr>
@@ -215,14 +215,14 @@ export default function BaseStockAnalysis() {
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-xs text-text-muted">ST% = Total Tertiary Sales / (Total Tertiary Sales + Current Stock). Sales months available counts from the first sales month in the six-month window through the latest sales month. F4M Requirement = Last 6M Sales / sales months available × 4. Stock - F4M Requirement is positive when stock is above four-month demand and negative when it is below.</p>
+          <p className="mt-3 text-xs text-text-muted">ST% = Current Stock / (Last 6M Sales + Current Stock). Active months count tertiary sales months across the selected filters, without splitting by category. Avg PM = Last 6M Sales / active months. F4M Requirement = Avg PM × 4. Stock - F4M Requirement is positive when stock is above four-month demand and negative when it is below.</p>
           {(analysisQ.data?.promo_rows || []).length > 0 && <div className="mt-4 overflow-hidden rounded-lg border border-border/80">
             <button type="button" aria-expanded={showPromo} onClick={() => setShowPromo((value) => !value)} className="flex w-full items-center justify-between gap-3 bg-surface/70 px-4 py-3 text-left hover:bg-card-hover">
               <span><span className="text-sm font-semibold text-text-primary">Promo items</span><span className="ml-2 text-xs text-text-muted">{analysisQ.data.promo_rows.length} detail rows | excluded from category shares</span></span>
               {showPromo ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
             {showPromo && <div className="max-h-64 overflow-auto border-t border-border"><table className="w-full min-w-[900px] text-xs">
-              <thead className="sticky top-0 bg-surface"><tr>{[...rowLabels, "Total Sales", "Last 6M Sales", "Current Stock", "ST%", "Sales Months", "F4M Requirement", "Stock - F4M Requirement"].map((label, index) => <th key={label + index} className="border-b border-r border-border px-3 py-2 text-left font-semibold text-text-secondary">{label}</th>)}</tr></thead>
+              <thead className="sticky top-0 bg-surface"><tr>{[...rowLabels, "Total Sales", "Last 6M Sales", "Current Stock", "ST%", "Avg PM", "F4M Requirement", "Stock - F4M Requirement"].map((label, index) => <th key={label + index} className="border-b border-r border-border px-3 py-2 text-left font-semibold text-text-secondary">{label}</th>)}</tr></thead>
               <tbody>{analysisQ.data.promo_rows.map((row, index) => <tr key={[row.category, ...dimensions.map((dimension) => row[dimension]), index].join("|")} className="border-b border-border/70 odd:bg-white/[0.025]">
                 {dimensions.map((column, dimensionIndex) => <td key={column + dimensionIndex} className="whitespace-nowrap border-r border-border/60 px-3 py-2 text-text-primary">{row[column] ?? "-"}</td>)}
                 {MEASURES.filter(({ key }) => !key.includes("contribution")).map((measure, measureIndex) => <td key={measure.key + measureIndex} className="whitespace-nowrap border-r border-border/60 px-3 py-2 text-right tabular-nums text-text-secondary">{measure.percent ? showPercent(row[measure.key]) : showNumber(row[measure.key])}</td>)}
