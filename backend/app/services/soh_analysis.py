@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from functools import lru_cache
 import logging
 import re
 from difflib import SequenceMatcher
@@ -10,7 +11,7 @@ import duckdb
 import pandas as pd
 
 from app.core.config import DATA_DIR
-from app.core.database import execute_df
+from app.core.database import cache_token, execute_df
 
 SOH_DB = DATA_DIR / "soh_data_src.duckdb"
 log = logging.getLogger(__name__)
@@ -176,7 +177,22 @@ def _merge_measures(
     return stock
 
 
-def get_summary(
+def get_summary(opening: str, ending: str, threshold: float = 1.0, filters: dict[str, str] | None = None) -> dict:
+    """Return a cached SOH summary for the same period and source revision."""
+    try:
+        stat = SOH_DB.stat()
+        source_token = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        source_token = (None, None)
+    filter_key = tuple(sorted((str(key), str(value)) for key, value in (filters or {}).items() if value))
+    return _get_summary_cached(opening, ending, float(threshold), filter_key, cache_token(), source_token)
+
+
+@lru_cache(maxsize=16)
+def _get_summary_cached(opening: str, ending: str, threshold: float, filter_key: tuple, _revision: tuple, _source_token: tuple) -> dict:
+    return _get_summary_uncached(opening, ending, threshold, dict(filter_key))
+
+def _get_summary_uncached(
     opening: str,
     ending: str,
     threshold: float = 1.0,
@@ -269,8 +285,8 @@ def get_summary(
     df = _merge_measures(df, transfers, ["secondary_transfer_qty", "secondary_return_qty"], "secondary transfers", warnings)
 
     opening_stock = df.opening_soh.clip(lower=0)
-    df["st_pct"] = (df.tertiary_period_sales / opening_stock.replace(0, pd.NA)).fillna(0)
-    df["opening_soh_clearance"] = df["st_pct"]
+    df["st_pct"] = (df.tertiary_total_sales / (df.tertiary_total_sales + opening_stock).replace(0, pd.NA)).fillna(0)
+    df["opening_soh_clearance"] = (df.tertiary_period_sales / opening_stock.replace(0, pd.NA)).fillna(0)
     return {
         "rows": df.drop(columns=["store_code"], errors="ignore").fillna(0).to_dict("records"),
         "dates": get_dates(),

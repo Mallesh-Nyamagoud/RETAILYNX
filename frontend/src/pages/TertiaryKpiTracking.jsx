@@ -188,7 +188,7 @@ export default function TertiaryKpiTracking() {
         )}
       </nav>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-base/30 px-4 py-3">
-        <div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-accent">{section === "quantity" ? "Quantity Bucket Based Analysis" : section === "revenue" ? "Revenue Bucket Based Analysis" : section === "category" ? "Category Performance" : "Top N Bills"}</p><p className="mt-1 text-xs text-text-muted">Choose the row level for this analysis. Global filters above apply to the results.</p></div>
+        <div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-accent">{section === "quantity" ? "Quantity Bucket Based Analysis" : section === "revenue" ? "Revenue Bucket Based Analysis" : section === "category" ? "Category Performance" : "Top N Bills"}</p><p className="mt-1 text-xs text-text-muted">{section === "category" ? "Storewise: Within shows category share inside each store; Across shows the store contribution to selected stores for each category. Brandwise uses the same definitions." : "Choose the row level for this analysis. Global filters above apply to the results."}</p></div>
         <div role="group" aria-label="Analysis row level" className="inline-flex rounded-lg border border-border bg-surface p-1">
           {DIMENSIONS.map(([key, label]) => <button key={key} type="button" onClick={() => setDimension(key)} aria-pressed={dimension === key} className={"rounded-md px-3 py-1.5 text-xs font-semibold transition-colors " + (dimension === key ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary")}>{label}</button>)}
         </div>

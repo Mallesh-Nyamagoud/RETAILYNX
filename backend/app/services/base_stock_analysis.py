@@ -294,6 +294,7 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
         SELECT TRIM(CAST(f.category AS VARCHAR)) AS category,
                UPPER(TRIM(CAST(f.category AS VARCHAR))) AS _category_key{select_dims},
                SUM(f.qty) AS total_sales,
+               MIN(CAST(f.date AS DATE)) AS first_sale_date,
                SUM(f.qty) FILTER (WHERE CAST(f.date AS DATE) >= ? AND CAST(f.date AS DATE) <= ?) AS last_6m_sales
         FROM tertiary_data.data f
         LEFT JOIN store_master.store_details dim
@@ -352,16 +353,22 @@ def run_analysis(hierarchy: list[str] | None, filters: dict[str, list[str]] | No
     combined["total_sales"] = pd.to_numeric(combined["total_sales"], errors="coerce").fillna(0)
     combined["last_6m_sales"] = pd.to_numeric(combined["last_6m_sales"], errors="coerce").fillna(0)
     combined["current_stock"] = pd.to_numeric(combined["current_stock"], errors="coerce").fillna(0)
+    combined["first_sale_date"] = pd.to_datetime(combined.get("first_sale_date"), errors="coerce")
+    start_month = pd.Period(six_month_start, freq="M").ordinal
+    end_month = pd.Period(sales_as_of, freq="M").ordinal
+    first_ordinals = combined["first_sale_date"].dt.to_period("M").map(lambda value: max(start_month, value.ordinal) if pd.notna(value) else end_month)
+    combined["sales_months_available"] = (end_month - first_ordinals + 1).clip(lower=1)
+    combined["st_pct"] = combined.apply(lambda row: safe_pct(row["total_sales"], row["total_sales"] + row["current_stock"]), axis=1)
+    combined["f4m_requirement"] = combined["last_6m_sales"] / combined["sales_months_available"] * 4
+    combined["requirement"] = combined["current_stock"] - combined["f4m_requirement"]
     is_promo = combined["category"].fillna("").astype(str).str.contains(r"\bpromo\b", case=False, regex=True)
     promo_rows = combined.loc[is_promo].copy()
     combined = combined.loc[~is_promo].copy()
     combined["total_sales_contribution_pct"] = combined["total_sales"].map(lambda value: safe_pct(value, combined["total_sales"].sum()))
     combined["last_6m_contribution_pct"] = combined["last_6m_sales"].map(lambda value: safe_pct(value, combined["last_6m_sales"].sum()))
     combined["current_stock_contribution_pct"] = combined["current_stock"].map(lambda value: safe_pct(value, combined["current_stock"].sum()))
-    combined["st_pct"] = combined.apply(lambda row: safe_pct(row["last_6m_sales"], row["last_6m_sales"] + row["current_stock"]), axis=1)
-    combined["f4m_requirement"] = combined["last_6m_sales"] / 6 * 4
-    combined["requirement"] = combined["current_stock"] - combined["f4m_requirement"]
-    combined = combined.drop(columns=["_category_key"], errors="ignore")
+    combined = combined.drop(columns=["_category_key", "first_sale_date"], errors="ignore")
+    promo_rows = promo_rows.drop(columns=["_category_key", "first_sale_date"], errors="ignore")
     return {
         "rows": combined.to_dict("records"),
         "promo_rows": promo_rows.to_dict("records"),

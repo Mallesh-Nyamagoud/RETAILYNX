@@ -108,12 +108,14 @@ export default function SohAnalysis() {
   const [opening, setOpening] = useState("");
   const [ending, setEnding] = useState("");
   const [columnSelections, setColumnSelections] = useState({});
-  const [rangeFilters, setRangeFilters] = useState({});
+  const [rangeFilters, setRangeFilters] = useState({ opening_soh_clearance: { max: 30 } });
   const [sort, setSort] = useState({ key: "style", direction: "asc" });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const tableScrollRef = useRef(null);
-  const datesQ = useQuery({ queryKey: ["soh", "dates"], queryFn: sohApi.dates });
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 200;
+  const datesQ = useQuery({ queryKey: ["soh", "dates"], queryFn: sohApi.dates, staleTime: 5 * 60_000 });
   const dates = datesQ.data?.dates || [];
   const start = opening || dates[0] || "";
   const validEnds = dates.filter((date) => date >= start);
@@ -123,6 +125,7 @@ export default function SohAnalysis() {
     queryKey: ["soh", "summary", params],
     enabled: canLoadSohSummary(datesQ, start, end),
     queryFn: () => sohApi.summary(params),
+    staleTime: 5 * 60_000,
   });
   const handleExport = async () => {
     setExporting(true); setExportError("");
@@ -134,12 +137,10 @@ export default function SohAnalysis() {
   const filterOptions = useMemo(() => Object.fromEntries(COLUMNS.map(({ key, value }) => [key, [...new Set(rows.map((row) => String(value(row) ?? "")).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))])), [rows]);
   const visibleRows = useMemo(() => {
     const filtered = rows.filter((row) => COLUMNS.every(({ key, value }) => {
-      if (key === "st_pct" || key === "opening_soh_clearance") {
+      if (key === "opening_soh_clearance") {
         const percent = Number(row[key] || 0) * 100;
-        const minText = rangeFilters[key]?.min ?? "";
-        const maxText = rangeFilters[key]?.max ?? "";
-        return (minText === "" || percent >= Number(minText))
-          && (maxText === "" || percent <= Number(maxText));
+        const max = rangeFilters[key]?.max ?? 30;
+        return percent <= Number(max);
       }
       const selected = columnSelections[key] || [];
       return selected.length === 0 || selected.includes(String(value(row) ?? ""));
@@ -154,6 +155,9 @@ export default function SohAnalysis() {
       return sort.direction === "asc" ? order : -order;
     });
   }, [rows, columnSelections, rangeFilters, sort]);
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
+  const pageRows = visibleRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  useEffect(() => setPage(0), [columnSelections, rangeFilters, sort, start, end]);
   const sourceError = getSohSourceError(datesQ);
   const sourceRefreshFailed = hasSohSourceRefreshFailure(datesQ);
   const toggleSort = (key) => setSort((current) => ({
@@ -183,7 +187,7 @@ export default function SohAnalysis() {
           <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-base/50 p-3">
             <div className="mr-auto min-w-48">
               <p className="text-sm font-semibold text-text-primary">SOH Summary</p>
-              <p className="text-xs text-text-muted">Showing {visibleRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows. Filter columns and select headings to sort.</p>
+              <p className="text-xs text-text-muted">Showing {visibleRows.length.toLocaleString()} of {rows.length.toLocaleString()} rows; page {page + 1} of {pageCount}.</p>
             </div>
             <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1" aria-label="Summary navigation">
               <button type="button" aria-label="Scroll summary up" title="Scroll up" className="rounded p-2 hover:bg-card-hover" onClick={() => tableScrollRef.current?.scrollBy({ top: -420, behavior: "smooth" })}><ChevronUp size={18} /></button>
@@ -197,36 +201,28 @@ export default function SohAnalysis() {
             <thead className="sticky top-0 z-30 bg-surface"><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2 text-left" style={frozenColumnStyle(key, true)} key={key}>
               <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap font-semibold hover:text-accent" onClick={() => toggleSort(key)}>{label}{sort.key === key ? (sort.direction === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ChevronDown size={12} className="opacity-30" />}</button>
             </th>)}</tr><tr>{COLUMNS.map(({ key, label }) => <th className="border-b border-border p-2" style={frozenColumnStyle(key, true)} key={key}>
-              {key === "st_pct" || key === "opening_soh_clearance" ? (
+              {key === "opening_soh_clearance" ? (
                 <div className="min-w-44 px-1">
                   {(() => {
-                    const range = rangeFilters[key] || {};
-                    const min = Number.isFinite(Number(range.min)) && range.min !== "" ? Number(range.min) : 0;
-                    const max = Number.isFinite(Number(range.max)) && range.max !== "" ? Number(range.max) : 100;
-                    const update = (edge, value) => setRangeFilters((current) => {
-                      const prior = current[key] || {};
-                      const next = edge === "min" ? Math.min(Number(value), Number(prior.max ?? 100)) : Math.max(Number(value), Number(prior.min ?? 0));
-                      return { ...current, [key]: { ...prior, [edge]: next } };
-                    });
-                    return <>
-                      <div className="mb-1 flex justify-between text-[10px] font-medium text-text-muted"><span>{min.toFixed(1)}%</span><span>{max.toFixed(1)}%</span></div>
-                      <div className="flex items-center gap-1">
-                        <input aria-label={`Minimum ${label}`} type="range" min="0" max="100" step="0.1" value={min} onChange={(e) => update("min", e.target.value)} className="h-1.5 min-w-0 flex-1 accent-sky-400" />
-                        <input aria-label={`Maximum ${label}`} type="range" min="0" max="100" step="0.1" value={max} onChange={(e) => update("max", e.target.value)} className="h-1.5 min-w-0 flex-1 accent-sky-400" />
-                      </div>
-                    </>;
+                    const max = rangeFilters[key]?.max ?? 30;
+                    const update = (value) => setRangeFilters((current) => ({ ...current, [key]: { max: Number(value) } }));
+                    return <div className="min-w-32">
+                      <div className="mb-1 text-center text-[10px] font-medium text-text-muted">Up to {Number(max).toFixed(1)}%</div>
+                      <input aria-label={`${label} maximum`} type="range" min="0" max="30" step="0.1" value={max} onChange={(e) => update(e.target.value)} className="h-1.5 w-full accent-sky-400" />
+                    </div>;
                   })()}
                 </div>
-              ) : (
+              ) : key === "st_pct" ? null : (
                 <ColumnMultiFilter label={label} options={filterOptions[key] || []} selected={columnSelections[key] || []} onChange={(selected) => setColumnSelections((current) => ({ ...current, [key]: selected }))} />
               )}
             </th>)}</tr></thead>
-            <tbody>{visibleRows.map((row, index) => <tr className="border-t border-border odd:bg-white/[0.03] hover:bg-white/[0.07]" key={`${row.store}-${row.brand}-${row.style}-${row.season}-${index}`}>
+            <tbody>{pageRows.map((row, index) => <tr className="border-t border-border odd:bg-white/[0.03] hover:bg-white/[0.07]" key={`${row.store}-${row.brand}-${row.style}-${row.season}-${index}`}>
               {COLUMNS.map(({ key, value }) => <td className="p-2 whitespace-nowrap" style={frozenColumnStyle(key)} key={key}>{value(row) ?? ""}</td>)}
             </tr>)}</tbody>
           </table></div>
+          {visibleRows.length > PAGE_SIZE && <div className="mt-3 flex items-center justify-end gap-3 text-xs"><button type="button" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))} className="rounded border border-border px-3 py-1.5 disabled:opacity-40">Previous</button><span>Page {page + 1} of {pageCount}</span><button type="button" disabled={page + 1 >= pageCount} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} className="rounded border border-border px-3 py-1.5 disabled:opacity-40">Next</button></div>}
           {visibleRows.length === 0 && <p className="py-8 text-center text-sm text-text-muted">No rows match these column filters. Clear a filter to see results.</p>}
-          <p className="mt-3 text-xs text-text-muted">Tertiary net sales include signed returns. Secondary transfer and return quantities are separate; returns retain their negative sign. ST% and Start SOH Clearance are each calculated as period tertiary net sales divided by Start SOH.</p>
+          <p className="mt-3 text-xs text-text-muted">Tertiary net sales include signed returns. Secondary transfer and return quantities are separate; returns retain their negative sign. ST% = all-date tertiary net sales / (all-date tertiary net sales + Start SOH). Start SOH Clearance = period tertiary net sales / Start SOH.</p>
         </Card>}
     </div>
   );
