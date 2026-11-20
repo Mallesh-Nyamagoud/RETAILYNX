@@ -15,7 +15,7 @@ FACT = analysis.FactSpec(
     table="data",
     date_column="bill_date",
     qty_expr="qty",
-    val_expr="value - tax",
+    val_expr="taxable_value",
 )
 
 
@@ -61,7 +61,7 @@ def monthwise(req: MonthwiseRequest):
             FACT,
             req.dimensions,
             req.filters,
-            measures=[{"key": "qty", "expr": "qty"}, {"key": "val", "expr": "value - tax"}],
+            measures=[{"key": "qty", "expr": "qty"}, {"key": "val", "expr": "taxable_value"}],
             growth_keys=["qty", "val"],
         )
     except ValueError as e:
@@ -82,7 +82,7 @@ def export(req: ExportRequest):
                 FACT,
                 req.dimensions,
                 req.filters,
-                measures=[{"key": "qty", "expr": "qty"}, {"key": "val", "expr": "value - tax"}],
+                measures=[{"key": "qty", "expr": "qty"}, {"key": "val", "expr": "taxable_value"}],
                 growth_keys=["qty", "val"],
             )
             sheets["Monthwise Sales"] = pd.DataFrame(mw["rows"])

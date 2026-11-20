@@ -78,11 +78,11 @@ def _report_cached(row_dimension, filters_key, _token):
     label=quote_ident(fields[row_dimension]); month_in=",".join(str(m) for m in lfytd_months) or "0"
     month_cond=(",".join(str(m) for m in months) if months else "")
     def annual_sum(column):
-        value = "COALESCE(f.qty,0)" if column == "qty" else "COALESCE(f.value - f.tax,0)"
+        value = "COALESCE(f.qty,0)" if column == "qty" else "COALESCE(f.taxable_value,0)"
         return f"SUM(CASE WHEN month(f.bill_date) IN ({month_cond}) THEN {value} ELSE 0 END)" if month_cond else f"SUM({value})"
 
     def ytd_sum(column):
-        value = "COALESCE(f.qty,0)" if column == "qty" else "COALESCE(f.value - f.tax,0)"
+        value = "COALESCE(f.qty,0)" if column == "qty" else "COALESCE(f.taxable_value,0)"
         return f"SUM(CASE WHEN month(f.bill_date) IN ({month_in}) THEN {value} ELSE 0 END)"
 
     sql=f"""
