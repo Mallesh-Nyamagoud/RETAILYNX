@@ -5,9 +5,41 @@ import pandas as pd
 from app.core.database import column_exists, execute_df, quote_ident
 from app.services.analysis import FactSpec, get_dimension_catalog
 from app.services.bill_analysis import _FY_LABEL_SQL, _iso_date
+from app.services.fy import build_fy_context
 
 
 def run_top_bills(fact: FactSpec, filters: dict, n: int, date_range: dict | None = None) -> dict:
+    """CFY/LFY comparison from FY2025-26 onward, with line-level filters."""
+    latest = execute_df(
+        f"SELECT MAX({quote_ident(fact.date_column)}) AS max_date "
+        f"FROM {quote_ident(fact.schema)}.{quote_ident(fact.table)} "
+        f"WHERE {quote_ident(fact.date_column)} >= DATE '2025-04-01'"
+    )
+    selected = dict(filters)
+    years = selected.pop("fy_label", [])
+    if latest.empty or pd.isna(latest.iloc[0].max_date):
+        return {"top_bills": {"n": n, "cfy": [], "lfy": []}, "meta": {"bill_count": 0}}
+    max_date = pd.Timestamp(latest.iloc[0].max_date)
+    fy = build_fy_context(max_date.date())
+    start, end = pd.Timestamp(fy.current_fy_start), max_date
+    if years:
+        anchor = max(int(str(year).removeprefix("FY").split("-")[0]) for year in years)
+        start, end = pd.Timestamp(anchor, 4, 1), pd.Timestamp(anchor + 1, 3, 31)
+    if date_range:
+        start = pd.Timestamp(date_range.get("start") or start)
+        end = pd.Timestamp(date_range.get("end") or end)
+    prior_start, prior_end = start - pd.DateOffset(years=1), end - pd.DateOffset(years=1)
+    current = _run_top_period(fact, selected, n, {"start": start.date().isoformat(), "end": end.date().isoformat()})
+    previous = _run_top_period(fact, selected, n, {"start": prior_start.date().isoformat(), "end": prior_end.date().isoformat()})
+    return {"dimension": [], "date_range": date_range,
+            "window_meta": {"mode": "fy", "cfy_start": start.date().isoformat(),
+                            "cfy_end": end.date().isoformat(), "lfy_start": prior_start.date().isoformat(),
+                            "lfy_end": prior_end.date().isoformat(), "minimum_date": "2025-04-01"},
+            "top_bills": {"n": n, "cfy": current["rows"], "lfy": previous["rows"]},
+            "meta": {"bill_count": current["bill_count"]}}
+
+
+def _run_top_period(fact: FactSpec, filters: dict, n: int, date_range: dict) -> dict:
     dims = {d["column"] for d in get_dimension_catalog()}
     # Store master is unique at store + brand grain; defensive deduplication
     # prevents duplicate dimension records from multiplying sales values.
@@ -16,7 +48,7 @@ def run_top_bills(fact: FactSpec, filters: dict, n: int, date_range: dict | None
     fact_name = f"f.{quote_ident('brand')}" if column_exists(fact.schema, fact.table, "brand") else "NULL"
     brand_name = f"COALESCE(NULLIF(TRIM(dim.brand), ''), NULLIF(TRIM(CAST({fact_name} AS VARCHAR)), ''), CAST(f.{quote_ident(fact.brand_column)} AS VARCHAR))"
     allowed = dims | {"brand", "brand_code", "adonis_store_code", "month_num", "fy_label", "month"}
-    clauses, params = [], []
+    clauses, params = ["CAST(tx_date AS DATE) >= DATE '2025-04-01'"], []
     for col, values in filters.items():
         if col not in allowed:
             raise ValueError(f"Unknown filter column: {col}")
@@ -93,7 +125,4 @@ def run_top_bills(fact: FactSpec, filters: dict, n: int, date_range: dict | None
                      "retailer_name": None if pd.isna(first.retailer_name) else str(first.retailer_name),
                      "brand": parts[0]["brand"], "qty": float(first.total_qty or 0),
                      "bill_val": total, "brand_contributions": parts})
-    return {"dimension": [], "date_range": date_range, "window_meta": {"mode": "selected-data"},
-            "top_bills": {"n": n, "overall": rows, "cfy": [], "lfy": [],
-                          "scope_label": "Selected data" if any(filters.values()) or date_range else "All available data"},
-            "meta": {"bill_count": int(fine.iloc[0].bill_count) if not fine.empty else 0}}
+    return {"rows": rows, "bill_count": int(fine.iloc[0].bill_count) if not fine.empty else 0}

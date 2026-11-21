@@ -18,7 +18,7 @@ class DynamicTopBillsTests(unittest.TestCase):
         self.catalog = [{"column": col, "label": col} for col in ['brand','retailer_name','department','state']]
         bk._bill_kpi_cached.cache_clear()
         self.stack = []
-        for obj, name, kwargs in [(top, 'execute_df', {"side_effect": lambda sql, params: self.con.execute(sql, params).df()}), (top, 'column_exists', {"return_value": True}), (top, 'get_dimension_catalog', {"return_value": self.catalog})]:
+        for obj, name, kwargs in [(top, 'execute_df', {"side_effect": lambda sql, params=None: self.con.execute(sql, params or []).df()}), (top, 'column_exists', {"return_value": True}), (top, 'get_dimension_catalog', {"return_value": self.catalog})]:
             context = patch.object(obj, name, **kwargs); context.start(); self.stack.append(context)
 
     def tearDown(self):
@@ -27,17 +27,18 @@ class DynamicTopBillsTests(unittest.TestCase):
         self.con.close()
 
     def run_top(self, filters=None, n=25, dates=None):
-        return bk.run_bill_kpi_analysis(FACT, filters or {}, ["brand"], dates, n, top_bills_only=True)["top_bills"]["overall"]
+        result = bk.run_bill_kpi_analysis(FACT, filters or {}, ["brand"], dates, n, top_bills_only=True)["top_bills"]
+        return sorted(result["cfy"] + result["lfy"], key=lambda row: -row["bill_val"])
 
-    def test_no_filters_includes_all_years_and_brands(self):
+    def test_no_filters_excludes_before_fy2025_and_keeps_brands(self):
         rows = self.run_top()
-        self.assertEqual([r['bill_val'] for r in rows], [2000,1300,900,600])
-        self.assertEqual(rows[0]['bill_date'], '2023-01-02')
-        self.assertEqual(len(rows[1]['brand_contributions']), 2)
+        self.assertEqual([r['bill_val'] for r in rows], [1300,900,600])
+        self.assertTrue(all(r['bill_date'] >= '2025-04-01' for r in rows))
+        self.assertEqual(len(rows[0]['brand_contributions']), 2)
 
     def test_blackberry_recomputes_mixed_bill_and_rank(self):
         rows = self.run_top({'brand':['BLACKBERRYS']})
-        self.assertEqual([r['bill_val'] for r in rows], [2000,600,500])
+        self.assertEqual([r['bill_val'] for r in rows], [600,500])
         self.assertEqual(rows[-1]['qty'], 5)
         self.assertTrue(all(p['brand']=='BLACKBERRYS' for r in rows for p in r['brand_contributions']))
         self.assertTrue(all(r['brand_contributions'][0]['contribution_pct']==100 for r in rows))
@@ -53,7 +54,7 @@ class DynamicTopBillsTests(unittest.TestCase):
 
     def test_multiple_fiscal_years_and_brands(self):
         rows = self.run_top({'fy_label':['FY2022-23','FY2025-26'], 'brand':['BLACKBERRYS','USPA']})
-        self.assertEqual([r['bill_val'] for r in rows], [2000,900])
+        self.assertEqual([r['bill_val'] for r in rows], [900])
 
     def test_explicit_dates_only_restrict_requested_window(self):
         rows = self.run_top(dates={'start':'2026-06-20','end':'2026-06-20'})
@@ -61,13 +62,13 @@ class DynamicTopBillsTests(unittest.TestCase):
 
     def test_reset_and_changing_filters_do_not_reuse_wrong_payload(self):
         self.assertEqual(self.run_top({'brand':['USPA']})[0]['bill_val'], 900)
-        self.assertEqual(self.run_top({'brand':['BLACKBERRYS']})[0]['bill_val'], 2000)
-        self.assertEqual(len(self.run_top()), 4)
-        self.assertEqual(len(self.run_top(n=1)), 1)
+        self.assertEqual(self.run_top({'brand':['BLACKBERRYS']})[0]['bill_val'], 600)
+        self.assertEqual(len(self.run_top()), 3)
+        self.assertEqual(len(self.run_top(n=1)), 2)
 
     def test_duplicate_master_does_not_multiply_sales(self):
         self.con.execute("INSERT INTO store_master.store_details SELECT * FROM store_master.store_details WHERE brand_code='B'")
-        self.assertEqual([r['bill_val'] for r in self.run_top()], [2000,1300,900,600])
+        self.assertEqual([r['bill_val'] for r in self.run_top()], [1300,900,600])
 
     def test_unknown_and_sql_injection_values(self):
         with self.assertRaises(ValueError): self.run_top({'unknown':['x']})
@@ -80,7 +81,25 @@ class DynamicTopBillsTests(unittest.TestCase):
         self.assertEqual(rows[0]['bill_val'], 0)
         self.assertEqual(rows[0]['qty'], 0)
         self.assertEqual(rows[0]['brand_contributions'][0]['contribution_pct'], 0)
-        self.assertEqual(len(self.run_top()), 5)
+        self.assertEqual(len(self.run_top()), 4)
+
+    def test_cfy_lfy_rank_separately_with_original_payload(self):
+        result = bk.run_bill_kpi_analysis(FACT, {}, top_bills_only=True)["top_bills"]
+        self.assertNotIn("overall", result)
+        self.assertEqual([r['bill_val'] for r in result['cfy']], [1300, 600])
+        self.assertEqual([r['bill_val'] for r in result['lfy']], [900])
+        self.assertEqual([r['rank'] for r in result['cfy']], [1, 2])
+        self.assertEqual(result['lfy'][0]['rank'], 1)
+
+    def test_fy2025_selection_never_returns_older_lfy(self):
+        result = bk.run_bill_kpi_analysis(FACT, {'fy_label':['FY2025-26']}, top_bills_only=True)["top_bills"]
+        self.assertEqual([r['bill_val'] for r in result['cfy']], [900])
+        self.assertEqual(result['lfy'], [])
+
+    def test_lfy_uses_matching_cutoff_and_brand_does_not_move_anchor(self):
+        self.con.execute("INSERT INTO tertiary_data.data VALUES ('2025-12-01','S','B','B','late',2,5000)")
+        rows = self.run_top({'brand':['BLACKBERRYS']})
+        self.assertEqual([r['bill_val'] for r in rows], [600, 500])
 
     def test_values_and_contributions_reconcile(self):
         for filters in ({}, {'brand':['BLACKBERRYS']}, {'department':['Mens']}, {'state':['MH']}):
