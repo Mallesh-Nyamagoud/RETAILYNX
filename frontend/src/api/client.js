@@ -140,7 +140,7 @@ export const billKpiApi = {
     http
       .get("/bill-kpi/slicers", { params: { filters: JSON.stringify(filters || {}) } })
       .then((r) => r.data),
-  analysis: (filters, dimension, distDim, topN, dateRange = null) =>
+  analysis: (filters, dimension, distDim, topN, dateRange = null, topBillsOnly = false, signal = undefined) =>
     http
       .post("/bill-kpi/analysis", {
         filters,
@@ -148,7 +148,8 @@ export const billKpiApi = {
         dist_dim: distDim,
         top_n: topN,
         date_range: dateRange,
-      })
+        top_bills_only: topBillsOnly,
+      }, { signal })
       .then((r) => r.data),
 };
 

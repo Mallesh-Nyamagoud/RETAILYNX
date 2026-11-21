@@ -75,6 +75,7 @@ def analysis_route(req: BillKpiRequest):
             date_range=req.date_range,
             top_n=req.top_n,
             dist_dim=req.dist_dim,
+            top_bills_only=req.top_bills_only,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

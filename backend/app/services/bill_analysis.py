@@ -301,7 +301,10 @@ def _filtered_bills(fact: FactSpec, filters: dict[str, list[str]]) -> pd.DataFra
                     f"Filter column '{col}' is not part of the bill-level dataset"
                 )
             raise ValueError(f"Unknown filter column: {col}")
-        col_mask = ds[col].isin(values)
+        col_mask = ds[col].isin(
+            pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+            if pd.api.types.is_numeric_dtype(ds[col]) else values
+        )
         mask = col_mask if mask is None else (mask & col_mask)
     if mask is None:
         return ds.reset_index(drop=True)

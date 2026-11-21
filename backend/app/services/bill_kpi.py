@@ -358,6 +358,9 @@ def _slicers_cached(fact: FactSpec, filters_key: tuple, _token: tuple) -> tuple[
     """Body of `get_slicers` (the `_token` argument is the cache key only)."""
     ds = _load_dataset(fact)
     f = {col: list(values) for col, values in filters_key}
+    for col in f:
+        if col in ds.columns and pd.api.types.is_numeric_dtype(ds[col]):
+            f[col] = pd.to_numeric(pd.Series(f[col]), errors="coerce").dropna().tolist()
     fcols = [k for k, vals in f.items() if vals and k in ds.columns]
     out: list[tuple[str, tuple]] = []
     # Cross-filtered subset narrowed by ALL OTHER applied filters.  Every
@@ -800,13 +803,31 @@ def _build_contributions(fact: FactSpec) -> dict:
     fine = fine[fine["internal_bill_id"].isin(bill_ids)]
     if fine.empty:
         return {}
+    # Prefer master names: the transaction brand field may contain a code.
+    master = execute_df("SELECT brand_code, brand FROM store_master.store_details")
+    master = master.dropna(subset=["brand_code", "brand"]).copy()
+    master["brand_code"] = master["brand_code"].astype(str).str.strip()
+    master["brand"] = master["brand"].astype(str).str.strip()
+    master = master[master["brand"].ne("")].sort_values(["brand_code", "brand"])
+    names_by_code = master.drop_duplicates("brand_code").set_index("brand_code")["brand"]
+    resolved = fine["brand_code"].astype("string").str.strip().map(names_by_code)
+    fine["brand_name"] = resolved.where(resolved.notna(), fine["brand_name"])
     # Label every part with the brand NAME (what the business reads); a code that
     # has no name falls back to the code itself.
     names = fine["brand_name"].astype("string").fillna("").str.strip()
     fine["brand"] = names.where(names.ne(""), fine["brand_code"].astype("string"))
+    # Aggregate all bills together instead of creating a pandas groupby for
+    # each individual bill (expensive on the first Top N request).
+    grouped = fine.groupby(["internal_bill_id", "brand"], dropna=False, sort=False)["bill_val"].sum().reset_index()
+    totals = grouped.groupby("internal_bill_id")["bill_val"].transform("sum")
+    grouped["contribution_pct"] = grouped["bill_val"].div(totals.where(totals.ne(0))).fillna(0) * 100.0
+    grouped = grouped.sort_values("bill_val", ascending=False, kind="stable")
     out: dict = {}
-    for bid, sub in fine.groupby("internal_bill_id", sort=False):
-        out[str(bid)] = _contribution_parts(sub)
+    for bid, brand, value, pct in grouped.itertuples(index=False, name=None):
+        out.setdefault(str(bid), []).append({
+            "brand": None if pd.isna(brand) else str(brand),
+            "bill_val": float(value), "contribution_pct": float(pct),
+        })
     return out
 
 
@@ -840,6 +861,7 @@ def _contribution_parts(sub: pd.DataFrame) -> list[dict]:
 # which is what made the module feel slow.
 _CONTRIB_FACT: FactSpec | None = None
 _CONTRIB_MAP: dict = {}
+_CONTRIB_TOKEN: tuple | None = None
 
 
 def _contrib_cache(fact: FactSpec, filters: dict | None = None) -> dict:
@@ -850,10 +872,12 @@ def _contrib_cache(fact: FactSpec, filters: dict | None = None) -> dict:
     per-fact singleton, and per-bill lookups keep every answer correct no
     matter which filters are applied.
     """
-    global _CONTRIB_FACT, _CONTRIB_MAP
-    if _CONTRIB_FACT is fact and _CONTRIB_MAP:
+    global _CONTRIB_FACT, _CONTRIB_MAP, _CONTRIB_TOKEN
+    token = cache_token()
+    if _CONTRIB_FACT == fact and _CONTRIB_TOKEN == token:
         return _CONTRIB_MAP
-    _CONTRIB_FACT, _CONTRIB_MAP = fact, _build_contributions(fact)
+    _CONTRIB_MAP = _build_contributions(fact)
+    _CONTRIB_FACT, _CONTRIB_TOKEN = fact, token
     return _CONTRIB_MAP
 
 
@@ -903,6 +927,7 @@ def run_bill_kpi_analysis(
     date_range: dict | None = None,
     top_n: int = 25,
     dist_dim: str | None = None,
+    top_bills_only: bool = False,
 ) -> dict:
     """Run the Bill_No Based KPI Analysis (req §1-9).
 
@@ -939,6 +964,7 @@ def run_bill_kpi_analysis(
         snap_top_n(top_n),
         str(dist_dim) if dist_dim else None,
         cache_token(),
+        top_bills_only,
     )
 
 
@@ -951,6 +977,7 @@ def _bill_kpi_cached(
     top_n_key: int,
     dist_dim_key: str | None,
     _token: tuple,
+    top_bills_only: bool = False,
 ) -> dict:
     """Body of `run_bill_kpi_analysis` (the `_token` argument is the cache key)."""
     filters = {col: list(values) for col, values in filters_key}
@@ -979,6 +1006,20 @@ def _bill_kpi_cached(
         max_date = max_date.tz_localize(None)
 
     cfy, lfy, window_meta = _period_windows(ds, date_range)
+
+    # Top-only requests skip hierarchy and distribution aggregation.
+    if top_bills_only:
+        _contrib_cache(fact)
+        result = _empty_result(top_n, dimension)
+        result.update({
+            "date_range": date_range, "window_meta": window_meta,
+            "top_bills": {"n": top_n,
+                          "cfy": _top_bill_rows(cfy, top_n, with_contrib=True),
+                          "lfy": _top_bill_rows(lfy, top_n, with_contrib=True)},
+            "meta": {"bill_count": len(cfy), "cfy_period": _period_bounds(cfy),
+                     "lfy_period": _period_bounds(lfy)},
+        })
+        return result
 
     # ---- Global (context-level) Active_Days for the SPD KPIs ---------------
     # Brand-anchored (req §3): if a single brand is in scope, use that brand's

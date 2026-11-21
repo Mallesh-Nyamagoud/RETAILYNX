@@ -758,9 +758,8 @@ export default function BillNoAnalysis({ filters, hierarchy = [], eyebrow, topBi
   const effectiveDistDim = distTouched.current ? distDim : (rowHierarchy[0] || "all");
 
   const q = useQuery({
-    queryKey: [eyebrow, "bill-kpi-analysis", filters, rowHierarchy, effectiveDistDim, topN, dateRange],
-    queryFn: () => billKpiApi.analysis(filters, rowHierarchy, effectiveDistDim, topN, dateRange),
-    placeholderData: (previousData) => previousData,
+    queryKey: [eyebrow, "bill-kpi-analysis", filters, rowHierarchy, effectiveDistDim, topN, dateRange, topBillsOnly],
+    queryFn: ({ signal }) => billKpiApi.analysis(filters, rowHierarchy, effectiveDistDim, topN, dateRange, topBillsOnly, signal),
     staleTime: 5 * 60_000,
     retry: false,
   });

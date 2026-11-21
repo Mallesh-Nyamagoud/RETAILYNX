@@ -64,6 +64,7 @@ class BillKpiRequest(BaseModel):
     date_range: dict | None = None
     top_n: int = 25
     dist_dim: str | None = None
+    top_bills_only: bool = False
 
 
 class ExportRequest(BaseModel):
