@@ -727,7 +727,7 @@ def _distribution_rows(
 # ---------------------------------------------------------------------------
 # Per-bill brand contributions (Retailer-only Top Bills breakdown, §9)
 # ---------------------------------------------------------------------------
-def _build_contributions(fact: FactSpec) -> dict:
+def _build_contributions(fact: FactSpec, bill_ids: set[str] | None = None) -> dict:
     """{internal_bill_id: [{brand, bill_val, contribution_pct}]} for EVERY
     valid bill of the fact table.
 
@@ -736,10 +736,9 @@ def _build_contributions(fact: FactSpec) -> dict:
     so multi-brand bills reconcile to ~100% (uses the ACTUAL per-brand value,
     NOT the dominant-line brand used for the store-master dimensions).
     """
-    ds = _load_dataset(fact)
-    bill_ids = set()
-    if not ds.empty and "internal_bill_id" in ds.columns:
-        bill_ids = {str(b) for b in ds["internal_bill_id"].dropna().unique()}
+    if bill_ids is None:
+        ds = _load_dataset(fact)
+        bill_ids = set(ds["internal_bill_id"].dropna().astype(str)) if not ds.empty else set()
     if not bill_ids:
         return {}
 
@@ -765,6 +764,16 @@ def _build_contributions(fact: FactSpec) -> dict:
         f"ELSE 'FY' || (EXTRACT(YEAR FROM {date_q}) - 1)::VARCHAR || '-' || "
         f"RIGHT(EXTRACT(YEAR FROM {date_q})::VARCHAR, 2) END"
     )
+    # Filter raw rows before aggregation so Top N never materializes all
+    # bills' brand mix. IDs are internal values and SQL literals are escaped.
+    selected_ids = ",".join("'" + str(bid).replace("'", "''") + "'" for bid in sorted(bill_ids))
+    bill_id_sql = (
+        f"COALESCE(CAST({sq(fact.store_column)} AS VARCHAR), '(no store)') || '-FY' || "
+        f"RIGHT(CAST(CASE WHEN EXTRACT(MONTH FROM {date_q}) >= 4 "
+        f"THEN EXTRACT(YEAR FROM {date_q}) ELSE EXTRACT(YEAR FROM {date_q}) - 1 END AS VARCHAR), 2) "
+        f"|| '-' || LPAD(CAST(EXTRACT(MONTH FROM {date_q}) AS INTEGER)::VARCHAR, 2, '0') "
+        "|| '-' || TRIM(CAST(bill_no AS VARCHAR))"
+    )
     sql = f"""
     WITH j AS (
         SELECT
@@ -783,6 +792,7 @@ def _build_contributions(fact: FactSpec) -> dict:
         WHERE bill_no IS NOT NULL
           AND TRIM(CAST(bill_no AS VARCHAR)) <> ''
           AND UPPER(TRIM(CAST(bill_no AS VARCHAR))) NOT IN ('NA','N/A')
+          AND ({bill_id_sql}) IN ({selected_ids})
         GROUP BY ALL
     )
     SELECT fy_label, fy_short, month_num, bill_no, store_code, brand_code,
@@ -794,7 +804,7 @@ def _build_contributions(fact: FactSpec) -> dict:
         return {}
     # Rebuild internal_bill_id so we can join to the cached bill dataset.
     fine["internal_bill_id"] = (
-        fine["store_code"].astype(str) + "-" + fine["fy_short"].astype(str)
+        fine["store_code"].fillna("(no store)").astype(str) + "-" + fine["fy_short"].astype(str)
         + "-" + fine["month_num"].astype(int).map(lambda m: f"{m:02d}")
         + "-" + fine["bill_no"].astype(str)
     )
@@ -917,6 +927,17 @@ def _top_bill_rows(df: pd.DataFrame, n: int, with_contrib: bool = False) -> list
     return out
 
 
+def _ranked_top_bills(fact: FactSpec, cfy: pd.DataFrame, lfy: pd.DataFrame, n: int) -> dict:
+    """Rank first; load complete physical brand mix only for returned bills."""
+    result = {"n": n, "cfy": _top_bill_rows(cfy, n), "lfy": _top_bill_rows(lfy, n)}
+    rows = result["cfy"] + result["lfy"]
+    selected = {row["internal_bill_id"] for row in rows}
+    contributions = _build_contributions(fact, selected) if selected else {}
+    for row in rows:
+        row["brand_contributions"] = contributions.get(row["internal_bill_id"], [])
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -1009,13 +1030,10 @@ def _bill_kpi_cached(
 
     # Top-only requests skip hierarchy and distribution aggregation.
     if top_bills_only:
-        _contrib_cache(fact)
         result = _empty_result(top_n, dimension)
         result.update({
             "date_range": date_range, "window_meta": window_meta,
-            "top_bills": {"n": top_n,
-                          "cfy": _top_bill_rows(cfy, top_n, with_contrib=True),
-                          "lfy": _top_bill_rows(lfy, top_n, with_contrib=True)},
+            "top_bills": _ranked_top_bills(fact, cfy, lfy, top_n),
             "meta": {"bill_count": len(cfy), "cfy_period": _period_bounds(cfy),
                      "lfy_period": _period_bounds(lfy)},
         })
@@ -1052,18 +1070,7 @@ def _bill_kpi_cached(
         cfy, lfy, dist_dim, "value_bucket", VALUE_BUCKETS, active_days
     )
 
-    # Top Bills stays a lightweight ranked list; KPI contribution figures are
-    # returned with the KPI and hierarchy payloads instead.  The per-bill brand
-    # mix (Brand - value [cont% of THAT bill]) is only populated when the
-    # contribution cache is actually built - warm it here so `_brand_contribution`
-    # has data to serve (it is keyed per FactSpec + filter context and reused
-    # across the CFY and LFY lists).
-    _contrib_cache(fact, filters or {})
-    top_bills = {
-        "n": top_n,
-        "cfy": _top_bill_rows(cfy, top_n, with_contrib=True),
-        "lfy": _top_bill_rows(lfy, top_n, with_contrib=True),
-    }
+    top_bills = _ranked_top_bills(fact, cfy, lfy, top_n)
 
     return {
         "dimension": dimension,

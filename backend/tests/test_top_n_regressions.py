@@ -39,7 +39,7 @@ class TopNRegressionTests(unittest.TestCase):
         bk._slicers_cached.cache_clear()
 
     def test_top_only_filter_changes_dates_and_n(self):
-        with patch.object(ba, "_load_bill_dataset", return_value=self.df), patch.object(bk, "bill_dimensions", return_value=[{"column": "brand", "label": "Brand"}]), patch.object(bk, "_contrib_cache", return_value={}), patch.object(bk, "_dimension_summary_rows", side_effect=AssertionError("hidden summary computed")), patch.object(bk, "_distribution_rows", side_effect=AssertionError("hidden distributions computed")):
+        with patch.object(ba, "_load_bill_dataset", return_value=self.df), patch.object(bk, "bill_dimensions", return_value=[{"column": "brand", "label": "Brand"}]), patch.object(bk, "_build_contributions", return_value={}), patch.object(bk, "_dimension_summary_rows", side_effect=AssertionError("hidden summary computed")), patch.object(bk, "_distribution_rows", side_effect=AssertionError("hidden distributions computed")):
             def run(filters, n=25):
                 return bk.run_bill_kpi_analysis(FACT, filters, ["brand"], {"start": "2025-04-01", "end": "2025-05-31"}, n, top_bills_only=True)["top_bills"]
             self.assertEqual([r["bill_val"] for r in run({}, 2)["cfy"]], [500., 300.])
@@ -49,6 +49,23 @@ class TopNRegressionTests(unittest.TestCase):
             self.assertEqual(run({"brand": ["missing"]})["cfy"], [])
             self.assertEqual(len(run({}, 1)["cfy"]), 1)
             self.assertEqual(len(run({}, 999)["cfy"]), 3)
+
+    def test_only_ranked_bills_get_brand_mix_without_global_cache(self):
+        with patch.object(bk, "_build_contributions", return_value={}) as build, patch.object(bk, "_contrib_cache", side_effect=AssertionError("global cache used")):
+            result = bk._ranked_top_bills(FACT, self.df.iloc[:3], self.df.iloc[3:], 1)
+        build.assert_called_once_with(FACT, {"T-FY25-04-2", "S-FY24-04-4"})
+        self.assertEqual(len(result["cfy"]), 1)
+        self.assertEqual(len(result["lfy"]), 1)
+        self.assertEqual(result["cfy"][0]["brand_contributions"], [])
+
+    def test_selected_bill_ids_restrict_sql_and_escape_quotes(self):
+        with patch.object(bk, "_load_dataset", side_effect=AssertionError("loaded all bills")), patch.object(bk, "column_exists", return_value=True), patch.object(bk, "execute_df", return_value=pd.DataFrame()) as query:
+            self.assertEqual(bk._build_contributions(FACT, {"S-FY25-04-O'1"}), {})
+        self.assertIn("IN ('S-FY25-04-O''1')", query.call_args.args[0])
+
+    def test_empty_ranked_results_skip_brand_mix_query(self):
+        with patch.object(bk, "_build_contributions", side_effect=AssertionError("unnecessary query")):
+            self.assertEqual(bk._ranked_top_bills(FACT, self.df.iloc[:0], self.df.iloc[:0], 25), {"n": 25, "cfy": [], "lfy": []})
 
     def test_rank_ties_nan_and_negative_values(self):
         df = self.df.copy()
