@@ -158,8 +158,11 @@ export default function TertiaryKpiTracking() {
     .filter(([key, values]) => key !== "fy" && key !== "month" && values?.length)
     .map(([key, values]) => [config?.fields?.[key] || key, values]));
   if (filters.month?.length) billFilters.month_num = filters.month.map(Number).filter(Number.isFinite);
-  const anchorFy = (filters.fy || []).map(Number).filter(Number.isFinite).sort((a, b) => b - a)[0];
-  const billDateRange = anchorFy ? { start: `${anchorFy}-04-01`, end: `${anchorFy + 1}-03-31` } : null;
+  if (filters.fy?.length) billFilters.fy_label = filters.fy.map((year) => {
+    const start = Number(year);
+    return `FY${start}-${String(start + 1).slice(-2)}`;
+  });
+  const billDateRange = null;
   const setDimension = (value) => setDimensions((current) => ({ ...current, [section]: value }));
   const payload = dataQuery.data;
   const bucketNames = payload?.buckets || { quantity: [], revenue: [] };

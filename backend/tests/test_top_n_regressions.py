@@ -38,17 +38,12 @@ class TopNRegressionTests(unittest.TestCase):
         self.assertEqual(slicers["brand"], ["Alpha"])
         bk._slicers_cached.cache_clear()
 
-    def test_top_only_filter_changes_dates_and_n(self):
-        with patch.object(ba, "_load_bill_dataset", return_value=self.df), patch.object(bk, "bill_dimensions", return_value=[{"column": "brand", "label": "Brand"}]), patch.object(bk, "_build_contributions", return_value={}), patch.object(bk, "_dimension_summary_rows", side_effect=AssertionError("hidden summary computed")), patch.object(bk, "_distribution_rows", side_effect=AssertionError("hidden distributions computed")):
-            def run(filters, n=25):
-                return bk.run_bill_kpi_analysis(FACT, filters, ["brand"], {"start": "2025-04-01", "end": "2025-05-31"}, n, top_bills_only=True)["top_bills"]
-            self.assertEqual([r["bill_val"] for r in run({}, 2)["cfy"]], [500., 300.])
-            filtered = run({"month_num": ["4"], "brand": ["Alpha"]})
-            self.assertEqual([r["bill_val"] for r in filtered["cfy"]], [100.])
-            self.assertEqual([r["bill_val"] for r in filtered["lfy"]], [80.])
-            self.assertEqual(run({"brand": ["missing"]})["cfy"], [])
-            self.assertEqual(len(run({}, 1)["cfy"]), 1)
-            self.assertEqual(len(run({}, 999)["cfy"]), 3)
+    def test_top_only_dispatches_without_loading_dominant_brand_dataset(self):
+        from app.services import top_bills
+        with patch.object(top_bills, "run_top_bills", return_value={"ok": True}) as run, patch.object(ba, "_load_bill_dataset", side_effect=AssertionError("dominant-brand dataset used")):
+            result = bk.run_bill_kpi_analysis(FACT, {"brand": ["BLACKBERRYS"]}, top_bills_only=True)
+        self.assertEqual(result, {"ok": True})
+        run.assert_called_once_with(FACT, {"brand": ["BLACKBERRYS"]}, 25, None)
 
     def test_only_ranked_bills_get_brand_mix_without_global_cache(self):
         with patch.object(bk, "_build_contributions", return_value={}) as build, patch.object(bk, "_contrib_cache", side_effect=AssertionError("global cache used")):

@@ -1006,6 +1006,9 @@ def _bill_kpi_cached(
     date_range = {k: v for k, v in date_range_key} if date_range_key else None
     top_n = top_n_key
     dist_dim = dist_dim_key
+    if top_bills_only:
+        from app.services.top_bills import run_top_bills
+        return run_top_bills(fact, filters, top_n, date_range)
     _validate_filters(fact, filters)
     if isinstance(dimension, str):
         dimension = [dimension]
@@ -1027,17 +1030,6 @@ def _bill_kpi_cached(
         max_date = max_date.tz_localize(None)
 
     cfy, lfy, window_meta = _period_windows(ds, date_range)
-
-    # Top-only requests skip hierarchy and distribution aggregation.
-    if top_bills_only:
-        result = _empty_result(top_n, dimension)
-        result.update({
-            "date_range": date_range, "window_meta": window_meta,
-            "top_bills": _ranked_top_bills(fact, cfy, lfy, top_n),
-            "meta": {"bill_count": len(cfy), "cfy_period": _period_bounds(cfy),
-                     "lfy_period": _period_bounds(lfy)},
-        })
-        return result
 
     # ---- Global (context-level) Active_Days for the SPD KPIs ---------------
     # Brand-anchored (req §3): if a single brand is in scope, use that brand's

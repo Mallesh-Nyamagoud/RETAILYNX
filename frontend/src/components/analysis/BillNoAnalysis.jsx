@@ -647,7 +647,8 @@ function TopBillsTable({ rows, showMix = false, dropBrandColumn = false, maxHeig
 
 function TopBills({ topBills, storeScoped = false, retailerFirst = false, maxHeightClass = "" }) {
   const [side, setSide] = useState("both");
-  const cfy = topBills?.cfy || [];
+  const overall = Array.isArray(topBills?.overall);
+  const cfy = overall ? topBills.overall : topBills?.cfy || [];
   const lfy = topBills?.lfy || [];
   // The Brand Mix column shows when a store filter is applied (the user asked
   // "for this big bill, which brands does it contain?"), whenever the returned
@@ -667,7 +668,7 @@ function TopBills({ topBills, storeScoped = false, retailerFirst = false, maxHei
   }
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-1">
+      {!overall && <div className="flex items-center gap-1">
         {[
           ["both", "Side by side"],
           ["cfy", "CFY only"],
@@ -687,17 +688,17 @@ function TopBills({ topBills, storeScoped = false, retailerFirst = false, maxHei
             {lbl}
           </button>
         ))}
-      </div>
-      <div className={clsx("grid gap-4", side === "both" ? "grid-cols-1 xl:grid-cols-2" : "grid-cols-1")}>
-        {side !== "lfy" && (
+      </div>}
+      <div className={clsx("grid gap-4", !overall && side === "both" ? "grid-cols-1 xl:grid-cols-2" : "grid-cols-1")}>
+        {(overall || side !== "lfy") && (
           <div>
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-secondary mb-2">
-              <Trophy size={12} className="text-accent" /> CFY · Top {topBills?.n}
+              <Trophy size={12} className="text-accent" /> {overall ? topBills.scope_label : "CFY"} · Top {topBills?.n}
             </p>
             <TopBillsTable rows={cfy} showMix={showMix} dropBrandColumn={retailerFirst} maxHeightClass={maxHeightClass} />
           </div>
         )}
-        {side !== "cfy" && (
+        {!overall && side !== "cfy" && (
           <div>
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-secondary mb-2">
               <Trophy size={12} className="text-text-muted" /> LFY · Top {topBills?.n}
