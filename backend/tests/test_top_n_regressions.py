@@ -38,6 +38,13 @@ class TopNRegressionTests(unittest.TestCase):
         self.assertEqual(slicers["brand"], ["Alpha"])
         bk._slicers_cached.cache_clear()
 
+    def test_month_options_follow_other_active_slicers(self):
+        bk._slicers_cached.cache_clear()
+        with patch.object(bk, "_load_dataset", return_value=self.df), patch.object(bk, "bill_dimensions", return_value=[{"column": "brand", "label": "Brand"}]):
+            self.assertEqual(bk.get_slicers(FACT, {"brand": ["Beta"]})["month_num"], [4])
+            self.assertEqual(bk.get_slicers(FACT, {"brand": ["missing"]})["month_num"], [])
+        bk._slicers_cached.cache_clear()
+
     def test_top_only_dispatches_without_loading_dominant_brand_dataset(self):
         from app.services import top_bills
         with patch.object(top_bills, "run_top_bills", return_value={"ok": True}) as run, patch.object(ba, "_load_bill_dataset", side_effect=AssertionError("dominant-brand dataset used")):

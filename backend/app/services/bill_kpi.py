@@ -385,9 +385,13 @@ def _slicers_cached(fact: FactSpec, filters_key: tuple, _token: tuple) -> tuple[
             for k in others:
                 sub = sub[sub[k].isin(f[k])]
         out.append((col, tuple(_distinct_col_values(sub, col))))
+    month_ds = ds
+    for col in fcols:
+        if col != "month_num":
+            month_ds = month_ds[month_ds[col].isin(f[col])]
     month_nums = (
-        sorted([int(m) for m in ds["month_num"].dropna().unique().tolist()])
-        if not ds.empty and "month_num" in ds.columns
+        sorted([int(m) for m in month_ds["month_num"].dropna().unique().tolist()])
+        if not month_ds.empty and "month_num" in month_ds.columns
         else []
     )
     out.append(("month_num", tuple(month_nums)))

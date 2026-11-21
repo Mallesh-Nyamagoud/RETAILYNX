@@ -276,8 +276,18 @@ def _build_filter_sql(filters: dict[str, list[str]]) -> tuple[str, list[Any]]:
     for col, values in (filters or {}).items():
         if not values:
             continue
-        if not column_exists("store_master", "store_details", col):
-            raise ValueError(f"Unknown filter column: {col}")
+        requested = col
+        # Summary/monthwise pages send UI field names; legacy analysis pages
+        # send physical columns. Resolve both to the same dimension predicate.
+        candidates = {
+            "store": ("retailer_name", "adonis_store_code"),
+            "brand": ("brand", "brand_code"),
+            "state": ("state", "state_name"),
+            "group": ("group", "store_group"),
+        }.get(col, (col,))
+        col = next((name for name in candidates if column_exists("store_master", "store_details", name)), None)
+        if col is None:
+            raise ValueError(f"Unknown filter column: {requested}")
         placeholders = ",".join(["?"] * len(values))
         clauses.append(f"dim.{quote_ident(col)} IN ({placeholders})")
         params.extend(values)
@@ -624,8 +634,16 @@ def _monthwise_cached(
     if max_date is None:
         return {"rows": [], "months": [], "fy_context": None}
 
-    fy = build_fy_context(max_date)
+    selected_months = [int(value) for value in filters.pop("month", []) if str(value).isdigit()]
+    selected_fys = [int(value) for value in filters.pop("fy", []) if str(value).isdigit()]
+    current_fy = max_date.year if max_date.month >= FY_START_MONTH else max_date.year - 1
+    anchor_fy = max(selected_fys) if selected_fys else current_fy
+    anchor_max_date = max_date if anchor_fy >= current_fy else date(anchor_fy + 1, 3, 31)
+    fy = build_fy_context(anchor_max_date)
     filter_sql, filter_params = _build_filter_sql(filters)
+    month_filter = ""
+    if selected_months:
+        month_filter = " AND month(f." + quote_ident(fact.date_column) + ") IN (" + ",".join("?" for _ in selected_months) + ")"
     # Internal aliases (dim__<col>) keep dimension columns from ever colliding
     # with a same-named raw fact column (e.g. tertiary_data.data.brand vs the
     # store_master.brand dimension) - collision-safe regardless of future
@@ -647,7 +665,7 @@ def _monthwise_cached(
             ON f.{quote_ident(fact.store_column)} = dim.adonis_store_code
            AND f.{quote_ident(fact.brand_column)} = dim.brand_code
         WHERE 1=1 {filter_sql}
-          AND f.{quote_ident(fact.date_column)} BETWEEN ?::DATE AND ?::DATE
+          AND f.{quote_ident(fact.date_column)} BETWEEN ?::DATE AND ?::DATE{month_filter}
     )
     SELECT
         {(dim_group_internal + ",") if dims else ""}
@@ -658,11 +676,13 @@ def _monthwise_cached(
     FROM dim_joined
     GROUP BY {(dim_group_internal + ",") if dims else ""} fy_bucket, cal_year, cal_month
     """
-    params = filter_params + [fy.last_fy_start, fy.current_fy_end, fy.current_fy_start]
+    params = filter_params + [fy.last_fy_start, fy.current_fy_end] + selected_months + [fy.current_fy_start]
     df = execute_df(sql, params)
     df = df.rename(columns={f"dim__{d}": d for d in dims})
 
     months_seq = _fy_month_sequence(fy)
+    if selected_months:
+        months_seq = [month for month in months_seq if month["cal_month"] in selected_months]
     measure_keys = [m["key"] for m in measures]
 
     if df.empty:
