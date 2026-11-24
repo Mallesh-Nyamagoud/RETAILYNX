@@ -64,6 +64,8 @@ def _anchor_and_months(filters, years):
         lfytd_months = [m for m in range(1,13) if (m-4)%12 <= (cutoff-4)%12]
     return anchor, months, lfytd_months
 def report(row_dimension, filters=None):
+    if row_dimension == "store_brand_rank":
+        return store_brand_rank(filters or {})
     return _report_cached(row_dimension, filter_key(filters), cache_token())
 @lru_cache(maxsize=64)
 def _report_cached(row_dimension, filters_key, _token):
@@ -128,3 +130,27 @@ def _report_cached(row_dimension, filters_key, _token):
         ytd=metric_values(cur, "ytd_")
         totals[str(y)]={**full, **{"lfytd_" + key: value for key, value in ytd.items()}}
     return {"years":years,"anchor":anchor,"current_fy":cfg["current_fy"],"current_fy_partial":cfg["current_fy_partial"],"rows":rows,"totals":totals}
+
+
+def store_brand_rank(filters):
+    cfg = config(filters)
+    if not {"store", "brand"}.issubset(cfg["fields"]):
+        raise ValueError("Store and brand fields are required")
+    brands = [b for b in cfg["options"].get("brand", []) if not filters.get("brand") or b in filters["brand"]]
+    stores = {}; totals = {}; anchor = None; partial = False
+    for brand in brands:
+        result = report("store", {**filters, "brand": [brand]})
+        anchor = result["anchor"]
+        partial = result["current_fy_partial"] and anchor == result["current_fy"]
+        previous_key = "lfytd_val" if partial else "val"
+        totals[brand] = {"current": result["totals"].get(str(anchor), {}).get("val", 0),
+                         "previous": result["totals"].get(str(anchor-1), {}).get(previous_key, 0)} if anchor else {"current":0,"previous":0}
+        ranked = sorted(result["rows"], key=lambda row: row["years"].get(str(anchor), {}).get("val",0), reverse=True)
+        last = None
+        for index, row in enumerate(ranked):
+            current = row["years"].get(str(anchor), {}).get("val",0)
+            previous = row["years"].get(str(anchor-1), {}).get(previous_key,0) if anchor else 0
+            if current != last: rank = index+1; last = current
+            stores.setdefault(row["label"], {})[brand] = {"current":current,"previous":previous,"rank":rank}
+    return {"anchor":anchor,"partial":partial,"brands":brands,"totals":totals,
+            "rows":[{"label":name,"cells":cells} for name,cells in sorted(stores.items())]}

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Boxes, ChevronDown, IndianRupee, Search, SlidersHorizontal } from "lucide-react";
+import StoreBrandRank from "../components/analysis/StoreBrandRank";
 import { tertiaryApi } from "../api/client";
 
-const pages = [["brand", "Brands comparison"], ["store", "Brand-store performance"], ["store_status", "Store status performance"], ["department", "Department-wise performance"], ["state", "State-wise performance"], ["group", "Group-wise performance"]];
+const pages = [["store_brand_rank", "Store × Brand Rank"], ["brand", "Brands comparison"], ["store", "Brand-store performance"], ["store_status", "Store status performance"], ["department", "Department-wise performance"], ["state", "State-wise performance"], ["group", "Group-wise performance"]];
 const filterOrder = ["store", "department", "store_status", "store_type", "brand", "state", "group", "month", "fy"];
 const display = (s) => s.replaceAll("_", " ").split(" ").map((word) => word ? word[0].toUpperCase() + word.slice(1) : word).join(" ");
 const fmt = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
@@ -212,12 +213,14 @@ export default function TertiarySummary() {
       const options = name === "month" ? config.months : name === "fy" ? (config.year_options || config.years).map((y) => ({ value: y, label: fyName(y) })) : (config.options[name] || []).map((v) => ({ value: v, label: v }));
       return <MultiFilter key={name} name={name} options={options} selected={(filters[name] || []).map(String)} onChange={(v) => setFilter(name, v)} open={openFilter === name} onToggle={() => setOpenFilter((current) => current === name ? null : name)} onClose={() => setOpenFilter(null)} />;
     })}</section>
-    <nav aria-label="Summary dimensions" className="flex gap-1 overflow-x-auto border-b border-border">{pages.filter(([key]) => key === "brand" || config?.fields[key]).map(([key, label]) => <button key={key} type="button" onClick={() => setPage(key)} className={"whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold " + (page === key ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text-primary")}>{label}</button>)}</nav>
+    <nav aria-label="Summary dimensions" className="flex gap-1 overflow-x-auto border-b border-border">{pages.filter(([key]) => key === "brand" || (key === "store_brand_rank" ? config?.fields.store && config?.fields.brand : config?.fields[key])).map(([key, label]) => <button key={key} type="button" onClick={() => { setPayload(null); setPage(key); }} className={"whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold " + (page === key ? "border-accent text-accent" : "border-transparent text-text-muted hover:text-text-primary")}>{label}</button>)}</nav>
+    {page === "store_brand_rank" ? <StoreBrandRank payload={payload} busy={busy} error={error}/> : <>
     <section className="overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5"><div><h2 className="font-display text-base font-semibold text-text-primary">Historical Performance Consolidated</h2><p className="mt-1 text-xs text-text-muted">{anchor != null ? fyName(anchor) + (currentPartial ? " current year to date" : " selected anchor year") : "Select filters to view fiscal-year totals"}</p></div>{busy && <span role="status" className="text-xs text-text-muted">Updating performance...</span>}</div>
       {error && <p role="alert" className="border-b border-border px-4 py-3 text-sm text-negative">{error}</p>}
       <div className="grid gap-4 p-4 sm:p-5 xl:grid-cols-2"><HistoryTable title="QTY" metric="qty" rows={historicalRows} total={overallTotals.qty} growth={historicalRows[0]?.qtyGrowth} rangeLabel={overallRange}/><HistoryTable title="VALUE" metric="val" rows={historicalRows} total={overallTotals.val} growth={historicalRows[0]?.valGrowth} rangeLabel={overallRange}/></div>
     </section>
     <ComparisonTable dimension={display(page)} rows={dataRows} groups={comparisonGroups} totals={totals} anchor={anchor} currentPartial={currentPartial} search={search} setSearch={setSearch}/>
+    </>}
   </main>;
 }
