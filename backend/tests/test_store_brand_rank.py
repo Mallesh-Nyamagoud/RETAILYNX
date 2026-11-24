@@ -18,6 +18,8 @@ class StoreBrandRankTests(unittest.TestCase):
         self.assertEqual(result["brands"],["X"])
         self.assertEqual([r["cells"]["X"]["rank"] for r in result["rows"]],[1,1,1])
         self.assertEqual(result["totals"]["X"]["previous"],250)
+        self.assertEqual(result["totals"]["X"]["full"],800)
+        self.assertEqual(result["rows"][0]["totals"]["full"],200)
         self.assertEqual(result["rows"][0]["cells"]["X"]["previous"],100)
         report.assert_called_once_with("store",{"brand":["X"],"state":["KA"]})
 
@@ -59,3 +61,22 @@ class StoreBrandRankTests(unittest.TestCase):
         self.assertAlmostEqual(b["contribution"], 700/1200*100)
         self.assertAlmostEqual(sum(r["contribution"] for r in result["rows"]),100)
         self.assertIsNone(c["cells"]["X"]["current_cont"])
+
+    @patch.object(summary, "report")
+    @patch.object(summary, "config")
+    def test_brand_order_and_unfiltered_last_full_year(self, config, report):
+        config.return_value = {"fields":{"store":"store","brand":"brand"},"options":{"brand":["X","Y"]}}
+        def get_report(dimension, filters):
+            result = self.result()
+            multiplier = 2 if filters["brand"] == ["Y"] else 1
+            result["totals"]["2026"]["val"] *= multiplier
+            for row in result["rows"]:
+                row["years"]["2026"]["val"] *= multiplier
+                row["years"]["2025"]["val"] = 900 if not filters.get("month") else 10
+            return result
+        report.side_effect = get_report
+        result = summary.store_brand_rank({"month":["4"]})
+        self.assertEqual(result["brands"], ["Y","X"])
+        self.assertEqual(result["rows"][0]["cells"]["X"]["full"],900)
+        self.assertEqual(result["rows"][0]["totals"]["full"],1800)
+        self.assertAlmostEqual(sum(row["contributions"]["current"] for row in result["rows"]),100)
