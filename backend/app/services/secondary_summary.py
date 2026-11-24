@@ -66,6 +66,8 @@ def _anchor_and_months(filters, years):
         lfytd_months = [m for m in range(1,13) if (m-4)%12 <= (cutoff-4)%12]
     return anchor, months, lfytd_months
 def report(row_dimension, filters=None):
+    if row_dimension == "store_brand_rank":
+        return store_brand_rank(filters or {})
     return _report_cached(row_dimension, filter_key(filters), cache_token())
 @lru_cache(maxsize=64)
 def _report_cached(row_dimension, filters_key, _token):
@@ -117,3 +119,8 @@ def _report_cached(row_dimension, filters_key, _token):
         ytd=metric_values(cur, "ytd_")
         totals[str(y)]={**full, **{"lfytd_" + key: value for key, value in ytd.items()}}
     return {"years":years,"anchor":anchor,"current_fy":cfg["current_fy"],"current_fy_partial":cfg["current_fy_partial"],"rows":rows,"totals":totals}
+
+
+def store_brand_rank(filters):
+    from app.services.summary_rank import build_store_brand_rank
+    return build_store_brand_rank(filters, config, report)
