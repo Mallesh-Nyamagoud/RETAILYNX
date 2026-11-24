@@ -145,12 +145,24 @@ def store_brand_rank(filters):
         previous_key = "lfytd_val" if partial else "val"
         totals[brand] = {"current": result["totals"].get(str(anchor), {}).get("val", 0),
                          "previous": result["totals"].get(str(anchor-1), {}).get(previous_key, 0)} if anchor else {"current":0,"previous":0}
-        ranked = sorted(result["rows"], key=lambda row: row["years"].get(str(anchor), {}).get("val",0), reverse=True)
+        for row in result["rows"]:
+            current = row["years"].get(str(anchor), {}).get("val", 0)
+            previous = row["years"].get(str(anchor-1), {}).get(previous_key, 0) if anchor else 0
+            stores.setdefault(row["label"], {})[brand] = {"current": current, "previous": previous}
+    rows = []
+    overall = sum(values["current"] for values in totals.values())
+    for name, cells in stores.items():
+        store_totals = {key: sum(cell[key] for cell in cells.values()) for key in ("current", "previous")}
+        ranked = sorted(cells.values(), key=lambda cell: cell["current"], reverse=True)
         last = None
-        for index, row in enumerate(ranked):
-            current = row["years"].get(str(anchor), {}).get("val",0)
-            previous = row["years"].get(str(anchor-1), {}).get(previous_key,0) if anchor else 0
-            if current != last: rank = index+1; last = current
-            stores.setdefault(row["label"], {})[brand] = {"current":current,"previous":previous,"rank":rank}
-    return {"anchor":anchor,"partial":partial,"brands":brands,"totals":totals,
-            "rows":[{"label":name,"cells":cells} for name,cells in sorted(stores.items())]}
+        for index, cell in enumerate(ranked):
+            if cell["current"] != last:
+                rank = index + 1
+                last = cell["current"]
+            cell["rank"] = rank
+            for key in ("current", "previous"):
+                cell[key + "_cont"] = cell[key] / store_totals[key] * 100 if store_totals[key] else None
+        rows.append({"label": name, "cells": cells, "totals": store_totals,
+                     "contribution": store_totals["current"] / overall * 100 if overall else None})
+    rows.sort(key=lambda row: (-row["totals"]["current"], row["label"]))
+    return {"anchor": anchor, "partial": partial, "brands": brands, "totals": totals, "rows": rows}
